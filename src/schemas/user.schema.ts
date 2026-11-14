@@ -321,3 +321,13 @@ export const UserGamePlatformsResponseSchema = z.object({
     completedAt: z.string().nullable()
   })
 })
+
+export const ImageUploadSignatureResponseSchema = z.object({
+  cloudName: z.string(),
+  apiKey: z.string(),
+  timestamp: z.number().int(),
+  folder: z.string(),
+  allowedFormats: z.string(),
+  uploadPreset: z.string(),
+  signature: z.string()
+})

@@ -1,10 +1,34 @@
 import { createHash } from 'crypto'
 import { fetchWithTimeout } from '../utils/fetch-with-timeout'
+import { ClientError } from '../errors/client-error'
 
 const CLOUDINARY_HOST = 'res.cloudinary.com'
 const DESTROY_TIMEOUT_MS = 5_000
 const PUBLIC_ID_PREFIX = 'images/'
 const VERSION_SEGMENT = /^v\d+$/
+const UPLOAD_FOLDER = 'images'
+const UPLOAD_ALLOWED_FORMATS = 'jpg,png,webp'
+
+export type UploadSignature = {
+  cloudName: string
+  apiKey: string
+  timestamp: number
+  folder: string
+  allowedFormats: string
+  uploadPreset: string
+  signature: string
+}
+
+export function signUpload(
+  params: Record<string, string | number>,
+  apiSecret: string
+): string {
+  const toSign = Object.keys(params)
+    .sort()
+    .map(key => `${key}=${params[key]}`)
+    .join('&')
+  return createHash('sha1').update(`${toSign}${apiSecret}`).digest('hex')
+}
 
 export class CloudinaryService {
   static isConfigured(): boolean {
@@ -13,6 +37,45 @@ export class CloudinaryService {
       process.env.CLOUDINARY_API_KEY &&
       process.env.CLOUDINARY_API_SECRET
     )
+  }
+
+  static isUploadConfigured(): boolean {
+    return (
+      CloudinaryService.isConfigured() &&
+      Boolean(process.env.CLOUDINARY_UPLOAD_PRESET)
+    )
+  }
+
+  static createUploadSignature(): UploadSignature {
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME
+    const apiKey = process.env.CLOUDINARY_API_KEY
+    const apiSecret = process.env.CLOUDINARY_API_SECRET
+    const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET
+    if (!cloudName || !apiKey || !apiSecret || !uploadPreset) {
+      console.error('[Cloudinary] upload signing is not configured')
+      throw new ClientError('Envio de imagens indisponível no momento.', 503)
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000)
+    const signature = signUpload(
+      {
+        allowed_formats: UPLOAD_ALLOWED_FORMATS,
+        folder: UPLOAD_FOLDER,
+        timestamp,
+        upload_preset: uploadPreset
+      },
+      apiSecret
+    )
+
+    return {
+      cloudName,
+      apiKey,
+      timestamp,
+      folder: UPLOAD_FOLDER,
+      allowedFormats: UPLOAD_ALLOWED_FORMATS,
+      uploadPreset,
+      signature
+    }
   }
 
   static publicIdFromUrl(rawUrl: string): string | null {
@@ -59,11 +122,10 @@ export class CloudinaryService {
     if (!cloudName || !apiKey || !apiSecret) return
 
     const timestamp = Math.floor(Date.now() / 1000)
-    const signature = createHash('sha1')
-      .update(
-        `invalidate=true&public_id=${publicId}&timestamp=${timestamp}${apiSecret}`
-      )
-      .digest('hex')
+    const signature = signUpload(
+      { invalidate: 'true', public_id: publicId, timestamp },
+      apiSecret
+    )
 
     const body = new URLSearchParams({
       public_id: publicId,

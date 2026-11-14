@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { createHash } from 'crypto'
-import { CloudinaryService } from './cloudinary.service'
+import { CloudinaryService, signUpload } from './cloudinary.service'
 
 describe('CloudinaryService', () => {
   beforeEach(() => {
@@ -64,6 +64,73 @@ describe('CloudinaryService', () => {
     it('is false when any credential is missing', () => {
       vi.stubEnv('CLOUDINARY_API_SECRET', '')
       expect(CloudinaryService.isConfigured()).toBe(false)
+    })
+  })
+
+  describe('signUpload', () => {
+    it('matches the Cloudinary documentation examples', () => {
+      expect(signUpload({ timestamp: 1315060510 }, 'abcd')).toBe(
+        'a21ad0f63beb4de2e5575204b79ab90bffb02c10'
+      )
+      expect(
+        signUpload(
+          {
+            timestamp: 1315060510,
+            public_id: 'sample_image',
+            eager: 'w_400,h_300,c_pad|w_260,h_200,c_crop'
+          },
+          'abcd'
+        )
+      ).toBe('bfd09f95f331f558cbd1320e67aa8d488770583e')
+    })
+  })
+
+  describe('createUploadSignature', () => {
+    beforeEach(() => {
+      vi.stubEnv('CLOUDINARY_UPLOAD_PRESET', 'signed_preset')
+      vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
+    })
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it('signs the fixed folder, formats, preset and server timestamp', () => {
+      const result = CloudinaryService.createUploadSignature()
+
+      expect(result).toEqual({
+        cloudName: 'mycloud',
+        apiKey: 'key',
+        timestamp: 1_700_000_000,
+        folder: 'images',
+        allowedFormats: 'jpg,png,webp',
+        uploadPreset: 'signed_preset',
+        signature: createHash('sha1')
+          .update(
+            'allowed_formats=jpg,png,webp&folder=images&timestamp=1700000000&upload_preset=signed_presetsecret'
+          )
+          .digest('hex')
+      })
+      expect(JSON.stringify(result)).not.toContain('secret')
+    })
+
+    it.each([
+      'CLOUDINARY_CLOUD_NAME',
+      'CLOUDINARY_API_KEY',
+      'CLOUDINARY_API_SECRET',
+      'CLOUDINARY_UPLOAD_PRESET'
+    ])('answers 503 when %s is missing', name => {
+      vi.stubEnv(name, '')
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      expect(() => CloudinaryService.createUploadSignature()).toThrow(
+        expect.objectContaining({ statusCode: 503 })
+      )
+    })
+
+    it('keeps isConfigured independent of the preset', () => {
+      vi.stubEnv('CLOUDINARY_UPLOAD_PRESET', '')
+      expect(CloudinaryService.isConfigured()).toBe(true)
+      expect(CloudinaryService.isUploadConfigured()).toBe(false)
     })
   })
 
