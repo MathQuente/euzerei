@@ -399,6 +399,7 @@ export class UserRepository {
         ugs.status                    AS "status",
         ug.endless                    AS "endless",
         gc.name                       AS "name",
+        gc.slug                       AS "slug",
         gc.cover_url                  AS "coverUrl",
         gc.platforms                  AS "platforms",
         gc.release_date               AS "releaseDate",
@@ -438,7 +439,7 @@ export class UserRepository {
     return prisma.$queryRaw<PaginatedUserGameRow[]>(Prisma.sql`
       SELECT
         ranked."igdbId", ranked."status", ranked."endless", ranked."name",
-        ranked."coverUrl", ranked."platforms", ranked."releaseDate",
+        ranked."slug", ranked."coverUrl", ranked."platforms", ranked."releaseDate",
         ranked."rating", ranked."completions", ranked."hoursPlayed",
         ranked."playedOn"
       FROM (${rows}) ranked

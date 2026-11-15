@@ -19,6 +19,11 @@ export class GameCacheService {
     return true
   }
 
+  async findSlug(igdbId: number): Promise<string | null> {
+    const slugs = await this.gameCacheRepository.findSlugsByIds([igdbId])
+    return slugs.get(igdbId) ?? null
+  }
+
   async assertReleased(igdbId: number): Promise<{ suggestsEndless: boolean }> {
     const cached =
       await this.gameCacheRepository.findReleaseInfoByIgdbId(igdbId)

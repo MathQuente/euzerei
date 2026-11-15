@@ -13,6 +13,14 @@ export class GameController {
     return reply.status(200).send({ game, relatedGames })
   }
 
+  async getGameBySlug(request: FastifyRequest, reply: FastifyReply) {
+    const { slug } = GameSchema.GameSlugParamsSchema.parse(request.params)
+
+    const { game, relatedGames } = await this.gameService.findGameBySlug(slug)
+
+    return reply.status(200).send({ game, relatedGames })
+  }
+
   async getAllGames(request: FastifyRequest, reply: FastifyReply) {
     const { query, limit, pageIndex, sortBy, sortOrder } =
       GameSchema.GameQueryStringSchema.parse(request.query)

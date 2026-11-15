@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 export const IGDBGameSchema = z.object({
   igdbId: z.number(),
+  slug: z.string().nullable().optional(),
   name: z.string(),
   coverUrl: z.string().nullable(),
   summary: z.string().optional(),
@@ -16,6 +17,7 @@ export const IGDBGameSchema = z.object({
   parentGame: z
     .object({
       igdbId: z.number(),
+      slug: z.string().nullable().optional(),
       name: z.string(),
       coverUrl: z.string().nullable()
     })
@@ -41,6 +43,10 @@ export const IGDBGameSchema = z.object({
 
 export const GameParamsSchema = z.object({
   igdbId: z.coerce.number().int()
+})
+
+export const GameSlugParamsSchema = z.object({
+  slug: z.string().min(1)
 })
 
 export const GameQueryStringSchema = z.object({

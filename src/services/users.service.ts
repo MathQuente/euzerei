@@ -382,6 +382,7 @@ export class UserService {
         if (r.name !== null) {
           return {
             igdbId: r.igdbId,
+            slug: r.slug,
             name: r.name,
             coverUrl: r.coverUrl,
             platforms: r.platforms ?? undefined,
@@ -400,6 +401,7 @@ export class UserService {
 
         return {
           igdbId: r.igdbId,
+          slug: null,
           name: g.name,
           coverUrl: IGDBService.formatCoverUrl(g.cover?.url),
           platforms: g.platforms?.map(p => p.name),
@@ -716,10 +718,12 @@ export class UserService {
     if (candidateIds.length > 0) {
       const pickedId = candidateIds[randomInt(candidateIds.length)]
       const game = await IGDBService.getGameById(pickedId)
+      const slug = game ? await this.gameCacheService.findSlug(game.id) : null
       return {
         game: game
           ? {
               igdbId: game.id,
+              slug,
               name: game.name,
               coverUrl: IGDBService.formatCoverUrl(game.cover?.url)
             }
@@ -739,6 +743,7 @@ export class UserService {
       return {
         game: {
           igdbId: picked.id,
+          slug: await this.gameCacheService.findSlug(picked.id),
           name: picked.name,
           coverUrl: IGDBService.formatCoverUrl(picked.cover?.url)
         },

@@ -255,6 +255,7 @@ model GameCache {
   gameModes          Int[]     @default([]) @map("game_modes")
   gameModesCheckedAt DateTime? @map("game_modes_checked_at")
   gameStatus         Int?      @map("game_status")
+  slug               String?   @unique
   syncedAt           DateTime  @default(now()) @updatedAt @map("synced_at")
 
   @@index([name])

@@ -146,6 +146,7 @@ export const GetUserGameStatusResponse = z.object({
 
 const UserGameEntrySchema = z.object({
   igdbId: z.number(),
+  slug: z.string().nullable().optional(),
   name: z.string(),
   coverUrl: z.string().nullable(),
   platforms: z.array(z.string()).optional(),
@@ -221,6 +222,7 @@ export const GetGamesToDisplayResponseSchema = z.object({
   game: z
     .object({
       igdbId: z.number(),
+      slug: z.string().nullable().optional(),
       name: z.string(),
       coverUrl: z.string().nullable()
     })

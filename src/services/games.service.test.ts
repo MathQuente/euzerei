@@ -20,7 +20,10 @@ function setup() {
     {
       getAverageRatingsForGames: vi.fn().mockResolvedValue(new Map())
     } as unknown as RatingRepository,
-    {} as GameCacheRepository,
+    {
+      findSlugsByIds: vi.fn().mockResolvedValue(new Map([[1, 'one']])),
+      findIdBySlug: vi.fn().mockResolvedValue(null)
+    } as unknown as GameCacheRepository,
     {} as UserRepository,
     cacheRepository as unknown as CacheRepository
   )
@@ -81,7 +84,10 @@ describe('GameService.findFeaturedGames', () => {
           .fn()
           .mockResolvedValue([{ igdbId: 3, avgRating: 9 }])
       } as unknown as RatingRepository,
-      {} as GameCacheRepository,
+      {
+        findSlugsByIds: vi.fn().mockResolvedValue(new Map([[1, 'one']])),
+        findIdBySlug: vi.fn().mockResolvedValue(null)
+      } as unknown as GameCacheRepository,
       {
         findTrendingIgdbIds: vi.fn().mockResolvedValue([
           { igdbId: 1, playingCount: 2 },
@@ -109,5 +115,104 @@ describe('GameService.findFeaturedGames', () => {
 
     expect(result.trendingGames.map(g => g.igdbId)).toEqual([1])
     expect(result.mostRatedGames.map(g => g.igdbId)).toEqual([3])
+  })
+})
+
+describe('GameService.findGameBySlug', () => {
+  function slugSetup() {
+    const { service } = setup()
+    const spy = vi
+      .spyOn(service, 'findGameById')
+      .mockResolvedValue({ game: { igdbId: 1 }, relatedGames: [] } as never)
+    return { service, spy }
+  }
+
+  it('resolves a slug through the cache and loads that game', async () => {
+    const cacheRepository = {
+      get: vi.fn().mockResolvedValue(null),
+      set: vi.fn()
+    }
+    const findIdBySlug = vi.fn().mockResolvedValue(62151)
+    const service = new GameService(
+      {} as unknown as RatingRepository,
+      { findIdBySlug } as unknown as GameCacheRepository,
+      {} as UserRepository,
+      cacheRepository as unknown as CacheRepository
+    )
+    const spy = vi
+      .spyOn(service, 'findGameById')
+      .mockResolvedValue({ game: {}, relatedGames: [] } as never)
+
+    await service.findGameBySlug('the-witcher-3-wild-hunt')
+
+    expect(findIdBySlug).toHaveBeenCalledWith('the-witcher-3-wild-hunt')
+    expect(spy).toHaveBeenCalledWith(62151)
+  })
+
+  it('treats an all-digit slug as an id without hitting the cache', async () => {
+    const { service, spy } = slugSetup()
+    await service.findGameBySlug('62151')
+    expect(spy).toHaveBeenCalledWith(62151)
+  })
+
+  it('answers 404 for an unknown slug', async () => {
+    const { service } = setup()
+    await expect(service.findGameBySlug('nope')).rejects.toMatchObject({
+      statusCode: 404
+    })
+  })
+
+  it('lowercases the slug before the lookup', async () => {
+    const findIdBySlug = vi.fn().mockResolvedValue(7)
+    const service = new GameService(
+      {} as unknown as RatingRepository,
+      { findIdBySlug } as unknown as GameCacheRepository,
+      {} as UserRepository,
+      {} as unknown as CacheRepository
+    )
+    vi.spyOn(service, 'findGameById').mockResolvedValue({} as never)
+
+    await service.findGameBySlug('The-Witcher-3')
+
+    expect(findIdBySlug).toHaveBeenCalledWith('the-witcher-3')
+  })
+})
+
+describe('GameService.findGameById slug', () => {
+  function detailSetup(slugs: Map<number, string>) {
+    const upsertMany = vi.fn().mockResolvedValue(undefined)
+    const service = new GameService(
+      {
+        getAverageRatingsForGames: vi.fn().mockResolvedValue(new Map())
+      } as unknown as RatingRepository,
+      {
+        findSlugsByIds: vi.fn().mockResolvedValue(slugs),
+        upsertMany
+      } as unknown as GameCacheRepository,
+      {} as UserRepository,
+      {
+        get: vi.fn().mockResolvedValue(null),
+        set: vi.fn().mockResolvedValue(undefined)
+      } as unknown as CacheRepository
+    )
+    vi.spyOn(IGDBService, 'getGameById').mockResolvedValue({
+      id: 5,
+      name: 'Doom'
+    } as never)
+    vi.spyOn(IGDBService, 'getRelatedGames').mockResolvedValue([])
+    return { service, upsertMany }
+  }
+
+  it('returns the cached slug', async () => {
+    const { service } = detailSetup(new Map([[5, 'doom']]))
+    const { game } = await service.findGameById(5)
+    expect(game.slug).toBe('doom')
+  })
+
+  it('returns a null slug and never writes to games_cache for an uncached game', async () => {
+    const { service, upsertMany } = detailSetup(new Map())
+    const { game } = await service.findGameById(5)
+    expect(game.slug).toBeNull()
+    expect(upsertMany).not.toHaveBeenCalled()
   })
 })

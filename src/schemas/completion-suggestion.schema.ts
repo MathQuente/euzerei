@@ -13,6 +13,7 @@ export const SuggestionListResponseSchema = z.object({
   suggestions: z.array(
     z.object({
       igdbId: z.number(),
+      slug: z.string().nullable().optional(),
       name: z.string(),
       coverUrl: z.string().nullable(),
       platform: PlatformEnumSchema,

@@ -80,6 +80,7 @@ export class CompletionSuggestionService implements CompletionSuggestionRecorder
     return {
       suggestions: rows.map(row => ({
         igdbId: row.igdbId,
+        slug: row.slug,
         name: row.name ?? `Jogo ${row.igdbId}`,
         coverUrl: row.coverUrl,
         platform: row.platform,

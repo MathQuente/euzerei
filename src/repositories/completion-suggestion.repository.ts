@@ -31,6 +31,7 @@ export interface UndoSnapshot {
 export interface PendingSuggestionRow {
   igdbId: number
   name: string | null
+  slug: string | null
   coverUrl: string | null
   platform: Platform
   evidence: SuggestionEvidence
@@ -105,6 +106,7 @@ export class CompletionSuggestionRepository {
       SELECT
         ug.igdb_id        AS "igdbId",
         gc.name           AS "name",
+        gc.slug           AS "slug",
         gc.cover_url      AS "coverUrl",
         cs.platform       AS "platform",
         cs.evidence       AS "evidence",
