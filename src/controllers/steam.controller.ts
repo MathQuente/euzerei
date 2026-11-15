@@ -25,7 +25,7 @@ export class SteamController {
 
   private redirectToLibrary(reply: FastifyReply, result: string) {
     return reply.redirect(
-      `${process.env.FRONTEND_URL}/userLibrary?steam=${result}`
+      `${process.env.FRONTEND_URL}/importar?steam=${result}`
     )
   }
 

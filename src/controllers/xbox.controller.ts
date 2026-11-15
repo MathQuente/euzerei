@@ -17,7 +17,7 @@ export class XboxController {
 
   private redirectToLibrary(reply: FastifyReply, result: string) {
     return reply.redirect(
-      `${process.env.FRONTEND_URL}/userLibrary?xbox=${result}`
+      `${process.env.FRONTEND_URL}/importar?xbox=${result}`
     )
   }
 
