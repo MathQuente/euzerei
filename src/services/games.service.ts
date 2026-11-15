@@ -19,7 +19,11 @@ export class GameService {
     private cacheRepository: CacheRepository
   ) {}
 
-  private formatGame(game: IGDBGame, rating: number | null = null) {
+  private formatGame(
+    game: IGDBGame,
+    rating: number | null = null,
+    slugs: Map<number, string>
+  ) {
     const developers = game.involved_companies
       ?.filter(c => c.developer)
       .map(c => c.company.name)
@@ -33,6 +37,7 @@ export class GameService {
       typeof game.parent_game === 'object' && game.parent_game
         ? {
             igdbId: game.parent_game.id,
+            slug: slugs.get(game.parent_game.id) ?? null,
             name: game.parent_game.name,
             coverUrl: IGDBService.formatCoverUrl(game.parent_game.cover?.url)
           }
@@ -62,6 +67,7 @@ export class GameService {
 
     return {
       igdbId: game.id,
+      slug: slugs.get(game.id) ?? null,
       name: game.name,
       coverUrl: IGDBService.formatCoverUrl(game.cover?.url),
       summary: game.summary,
@@ -86,11 +92,26 @@ export class GameService {
     }
   }
 
+  private idsWithParents(games: IGDBGame[]): number[] {
+    const ids = new Set<number>()
+    for (const g of games) {
+      ids.add(g.id)
+      if (typeof g.parent_game === 'object' && g.parent_game) {
+        ids.add(g.parent_game.id)
+      }
+    }
+    return [...ids]
+  }
+
   private async enrichWithRatings(games: IGDBGame[]) {
     const igdbIds = games.map(g => g.id)
-    const ratingsMap =
-      await this.ratingRepository.getAverageRatingsForGames(igdbIds)
-    return games.map(g => this.formatGame(g, ratingsMap.get(g.id) ?? null))
+    const [ratingsMap, slugs] = await Promise.all([
+      this.ratingRepository.getAverageRatingsForGames(igdbIds),
+      this.gameCacheRepository.findSlugsByIds(this.idsWithParents(games))
+    ])
+    return games.map(g =>
+      this.formatGame(g, ratingsMap.get(g.id) ?? null, slugs)
+    )
   }
 
   private async enrichWithUserLibraryData<T extends { igdbId: number }>(
@@ -135,6 +156,7 @@ export class GameService {
 
     const games = cached.map(g => ({
       igdbId: g.igdbId,
+      slug: g.slug ?? null,
       name: g.name,
       coverUrl: g.coverUrl ?? null,
       summary: g.summary ?? undefined,
@@ -177,17 +199,39 @@ export class GameService {
       )
     }
 
-    const ratingsMap = await this.ratingRepository.getAverageRatingsForGames([
-      igdbId,
-      ...relatedGames.map(g => g.id)
+    const [ratingsMap, slugs] = await Promise.all([
+      this.ratingRepository.getAverageRatingsForGames([
+        igdbId,
+        ...relatedGames.map(g => g.id)
+      ]),
+      this.slugsForDetail(game, relatedGames)
     ])
 
     return {
-      game: this.formatGame(game, ratingsMap.get(igdbId) ?? null),
+      game: this.formatGame(game, ratingsMap.get(igdbId) ?? null, slugs),
       relatedGames: relatedGames.map(g =>
-        this.formatGame(g, ratingsMap.get(g.id) ?? null)
+        this.formatGame(g, ratingsMap.get(g.id) ?? null, slugs)
       )
     }
+  }
+
+  async findGameBySlug(slug: string) {
+    const normalized = slug.toLowerCase()
+    const igdbId = /^\d+$/.test(normalized)
+      ? Number(normalized)
+      : await this.gameCacheRepository.findIdBySlug(normalized)
+
+    if (igdbId === null || !Number.isSafeInteger(igdbId)) {
+      throw new ClientError('Jogo não encontrado.', 404)
+    }
+
+    return this.findGameById(igdbId)
+  }
+
+  private slugsForDetail(game: IGDBGame, relatedGames: IGDBGame[]) {
+    return this.gameCacheRepository.findSlugsByIds(
+      this.idsWithParents([game, ...relatedGames])
+    )
   }
 
   async findFeaturedGames(userId?: string) {
@@ -310,7 +354,12 @@ export class GameService {
           !isHiddenFromCatalog(g.game_status, g.first_release_date)
       )
 
-    return ordered.map(g => this.formatGame(g, ratings.get(g.id) ?? null))
+    const slugs = await this.gameCacheRepository.findSlugsByIds(
+      this.idsWithParents(ordered)
+    )
+    return ordered.map(g =>
+      this.formatGame(g, ratings.get(g.id) ?? null, slugs)
+    )
   }
 
   private async findTrendingGames(limit = 20) {

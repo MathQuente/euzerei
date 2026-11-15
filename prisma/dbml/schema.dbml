@@ -166,6 +166,7 @@ Table games_cache {
   gameModes Int[] [not null]
   gameModesCheckedAt DateTime
   gameStatus Int
+  slug String [unique]
   syncedAt DateTime [default: `now()`, not null]
 }
 

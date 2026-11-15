@@ -13,6 +13,7 @@ export type PaginatedUserGameRow = {
   igdbId: number
   status: Status
   name: string | null
+  slug: string | null
   coverUrl: string | null
   platforms: string[] | null
   releaseDate: number | null

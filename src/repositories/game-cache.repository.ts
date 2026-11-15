@@ -3,6 +3,8 @@ import { isValidCoverUrl } from '../utils/cover-url-change'
 import { prisma } from '../database/db'
 import { GameCacheSortBy, GameCacheSortOrder } from '../types/game-cache'
 import { GAME_STATUS } from '../utils/game-status'
+import { isUniqueViolation } from '../utils/prisma-errors'
+import { slugCandidates, uniqueSlug } from '../utils/game-slug'
 
 const MIN_TOTAL_RATING_COUNT = 10
 const MIN_HYPES = 5
@@ -102,6 +104,7 @@ export class GameCacheRepository {
         take: limit,
         select: {
           igdbId: true,
+          slug: true,
           name: true,
           coverUrl: true,
           summary: true,
@@ -133,6 +136,7 @@ export class GameCacheRepository {
       prisma.$queryRaw<
         Array<{
           igdb_id: number
+          slug: string | null
           name: string
           cover_url: string | null
           summary: string | null
@@ -143,7 +147,7 @@ export class GameCacheRepository {
           parent_game_id: number | null
         }>
       >(Prisma.sql`
-        SELECT gc.igdb_id, gc.name, gc.cover_url, gc.summary, gc.genres, gc.platforms, gc.release_date,
+        SELECT gc.igdb_id, gc.slug, gc.name, gc.cover_url, gc.summary, gc.genres, gc.platforms, gc.release_date,
                gc.category, gc.parent_game_id
         FROM games_cache gc
         ${where}
@@ -158,6 +162,7 @@ export class GameCacheRepository {
     return {
       games: games.map(g => ({
         igdbId: g.igdb_id,
+        slug: g.slug,
         name: g.name,
         coverUrl: g.cover_url,
         summary: g.summary,
@@ -192,6 +197,7 @@ export class GameCacheRepository {
       prisma.$queryRaw<
         Array<{
           igdb_id: number
+          slug: string | null
           name: string
           cover_url: string | null
           summary: string | null
@@ -202,7 +208,7 @@ export class GameCacheRepository {
           parent_game_id: number | null
         }>
       >(Prisma.sql`
-        SELECT gc.igdb_id, gc.name, gc.cover_url, gc.summary, gc.genres, gc.platforms, gc.release_date,
+        SELECT gc.igdb_id, gc.slug, gc.name, gc.cover_url, gc.summary, gc.genres, gc.platforms, gc.release_date,
                gc.category, gc.parent_game_id,
                AVG(r.value) as avg_rating
         FROM games_cache gc
@@ -220,6 +226,7 @@ export class GameCacheRepository {
     return {
       games: games.map(g => ({
         igdbId: g.igdb_id,
+        slug: g.slug,
         name: g.name,
         coverUrl: g.cover_url,
         summary: g.summary,
@@ -269,6 +276,130 @@ export class GameCacheRepository {
       })),
       skipDuplicates: true
     })
+    await this.assignMissingSlugs(games.map(g => g.igdbId)).catch(error =>
+      console.error('[GameCache] assignMissingSlugs failed', error)
+    )
+  }
+
+  async assignMissingSlugs(igdbIds: number[]): Promise<number> {
+    if (igdbIds.length === 0) return 0
+    const rows = await prisma.gameCache.findMany({
+      where: { igdbId: { in: igdbIds }, slug: null },
+      orderBy: { igdbId: 'asc' },
+      select: { igdbId: true, name: true }
+    })
+    if (rows.length === 0) return 0
+
+    const taken = await this.findTakenSlugs(
+      rows.flatMap(r => slugCandidates(r.name, r.igdbId))
+    )
+    const updates = rows.map(r => ({
+      igdbId: r.igdbId,
+      slug: this.claimSlug(r, taken)
+    }))
+
+    try {
+      return await this.updateSlugs(updates)
+    } catch (error) {
+      console.warn(
+        '[GameCache] batch slug update failed, retrying row by row',
+        error
+      )
+    }
+
+    let written = 0
+    for (const row of rows) {
+      written += await this.assignSlugOneByOne(row)
+    }
+    return written
+  }
+
+  private async assignSlugOneByOne(row: {
+    igdbId: number
+    name: string
+  }): Promise<number> {
+    for (const candidate of [
+      ...slugCandidates(row.name, row.igdbId),
+      String(row.igdbId)
+    ]) {
+      try {
+        const result = await prisma.gameCache.updateMany({
+          where: { igdbId: row.igdbId, slug: null },
+          data: { slug: candidate }
+        })
+        return result.count
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error
+      }
+    }
+    return 0
+  }
+
+  private async findTakenSlugs(candidates: string[]): Promise<Set<string>> {
+    const rows = await prisma.gameCache.findMany({
+      where: { slug: { in: candidates } },
+      select: { slug: true }
+    })
+    return new Set(rows.map(r => r.slug as string))
+  }
+
+  private claimSlug(
+    game: { igdbId: number; name: string },
+    taken: Set<string>
+  ): string {
+    const slug = uniqueSlug(game.name, game.igdbId, s => taken.has(s))
+    taken.add(slug)
+    return slug
+  }
+
+  async findSlugsByIds(igdbIds: number[]): Promise<Map<number, string>> {
+    if (igdbIds.length === 0) return new Map()
+    const rows = await prisma.gameCache.findMany({
+      where: { igdbId: { in: igdbIds }, slug: { not: null } },
+      select: { igdbId: true, slug: true }
+    })
+    return new Map(rows.map(r => [r.igdbId, r.slug as string]))
+  }
+
+  async findIdBySlug(slug: string): Promise<number | null> {
+    const row = await prisma.gameCache.findUnique({
+      where: { slug },
+      select: { igdbId: true }
+    })
+    return row?.igdbId ?? null
+  }
+
+  async findSlugBackfillBatchAfter(afterId: number, limit: number) {
+    return prisma.gameCache.findMany({
+      where: { igdbId: { gt: afterId } },
+      orderBy: { igdbId: 'asc' },
+      take: limit,
+      select: { igdbId: true, name: true, slug: true }
+    })
+  }
+
+  async findAllSlugs(): Promise<string[]> {
+    const rows = await prisma.gameCache.findMany({
+      where: { slug: { not: null } },
+      select: { slug: true }
+    })
+    return rows.map(r => r.slug as string)
+  }
+
+  async updateSlugs(
+    updates: Array<{ igdbId: number; slug: string }>
+  ): Promise<number> {
+    if (updates.length === 0) return 0
+    const rows = JSON.stringify(
+      updates.map(u => ({ id: u.igdbId, slug: u.slug }))
+    )
+    return prisma.$executeRaw(Prisma.sql`
+      UPDATE games_cache gc
+      SET slug = v.slug
+      FROM jsonb_to_recordset(${rows}::jsonb) AS v(id int, slug text)
+      WHERE gc.igdb_id = v.id
+        AND gc.slug IS NULL
+    `)
   }
 
   async findByIgdbId(igdbId: number) {
