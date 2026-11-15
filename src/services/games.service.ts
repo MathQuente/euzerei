@@ -9,6 +9,7 @@ import { isHiddenFromCatalog } from '../utils/game-status'
 
 const TRENDING_WINDOW_DAYS = 30
 const GAME_CACHE_TTL_SECONDS = 60 * 60
+const RECENT_FEATURED_LIMIT = 9
 
 export class GameService {
   constructor(
@@ -193,7 +194,7 @@ export class GameService {
     const [trending, mostRated, recent, future] = await Promise.all([
       this.findTrendingGames(6),
       this.findMostRatedGames(6),
-      this.findRecentlyReleasedGames(6),
+      this.findRecentlyReleasedGames(RECENT_FEATURED_LIMIT),
       this.findComingSoonGames(6, 0, userId)
     ])
 
