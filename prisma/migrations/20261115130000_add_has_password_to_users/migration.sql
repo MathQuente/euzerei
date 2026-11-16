@@ -1,10 +1,10 @@
 -- Indica se a conta tem uma senha de verdade. Contas criadas ou vinculadas por
--- Google/Discord guardam uma senha aleatória descartada, então o campo não dá
--- para deduzir de google_id/discord_id.
+-- Google/Discord depois desta migration guardam uma senha aleatória descartada
+-- e ficam com false.
+--
+-- As contas que já existem começam todas com true: não dá para saber quais
+-- tinham a senha descartada (quem a redefiniu depois tem uma senha de verdade),
+-- e tratar uma conta com senha como "sem senha" dispensaria a senha atual.
+-- Quem entrou só por Google ou Discord e não conhece a senha usa "Esqueci a
+-- senha", que define uma senha por e-mail.
 ALTER TABLE "users" ADD COLUMN "has_password" BOOLEAN NOT NULL DEFAULT true;
-
--- Aproximação para as contas existentes: quem já tem um provedor vinculado
--- tinha a senha descartada. Quem redefiniu a senha depois aparece como "sem
--- senha" e só vê a opção de definir uma, o que é inofensivo.
-UPDATE "users" SET "has_password" = false
-WHERE "google_id" IS NOT NULL OR "discord_id" IS NOT NULL;
