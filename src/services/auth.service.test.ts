@@ -7,6 +7,7 @@ import { CacheRepository } from '../repositories/cache.repository'
 import { ClientError } from '../errors/client-error'
 import { TermsRequiredError } from '../errors/terms-required-error'
 import { EmailService } from './email.service'
+import { ReauthRequiredError } from '../errors/reauth-required-error'
 
 function fakeJwt(overrides: Partial<JWT> = {}): JWT {
   return {
@@ -1667,5 +1668,219 @@ describe('AuthService OAuth terms acceptance', () => {
 
     expect(createWithDiscord).not.toHaveBeenCalled()
     expect(saveToken).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('AuthService.loginWithGoogle with a verified account email', () => {
+  it('keeps the password when the existing account already verified its email', async () => {
+    const linkGoogle = vi.fn().mockResolvedValue({ id: 'user-1' })
+    const authRepository = fakeAuthRepository({
+      findUserByGoogleId: vi.fn().mockResolvedValue(null),
+      findByEmail: vi.fn().mockResolvedValue({
+        id: 'user-1',
+        googleId: null,
+        discordId: null,
+        emailVerifiedAt: new Date()
+      }),
+      linkGoogle,
+      saveToken: vi.fn()
+    })
+    const cache = fakeCache()
+    const service = new AuthService(authRepository, fakeJwt(), cache)
+
+    await service.loginWithGoogle(
+      {
+        sub: 'google-1',
+        email: 'a@a.com',
+        email_verified: true,
+        name: 'A',
+        picture: 'pic'
+      },
+      true
+    )
+
+    expect(linkGoogle).toHaveBeenCalledWith('user-1', 'google-1', 'pic', null)
+  })
+})
+
+describe('AuthService.changePassword', () => {
+  const NEW_PASSWORD = 'uma-senha-nova-forte'
+
+  async function build(
+    state: { hasPassword: boolean; password?: string },
+    opts: { recent?: boolean; failures?: number } = {}
+  ) {
+    const password = state.password ?? (await bcrypt.hash('senha-atual-1', 4))
+    const updatePassword = vi.fn().mockResolvedValue({ email: 'a@a.com' })
+    const deleteTokensByUserId = vi.fn()
+    const authRepository = fakeAuthRepository({
+      findPasswordState: vi.fn().mockResolvedValue({
+        id: 'user-1',
+        email: 'a@a.com',
+        password,
+        hasPassword: state.hasPassword
+      }),
+      updatePassword,
+      deleteTokensByUserId,
+      saveToken: vi.fn()
+    })
+    const cache = fakeCache(opts.failures ?? null)
+    const emailService = {
+      sendPasswordChangedEmail: vi.fn().mockResolvedValue(undefined)
+    } as unknown as EmailService
+    const recentAuth = {
+      isRecent: vi.fn().mockResolvedValue(opts.recent ?? true),
+      mark: vi.fn().mockResolvedValue(undefined)
+    }
+    const service = new AuthService(
+      authRepository,
+      fakeJwt(),
+      cache,
+      emailService,
+      recentAuth as never
+    )
+    return {
+      service,
+      updatePassword,
+      deleteTokensByUserId,
+      cache,
+      emailService,
+      recentAuth
+    }
+  }
+
+  it('rejects a wrong current password and counts the failure apart from login', async () => {
+    const { service, updatePassword, cache } = await build({
+      hasPassword: true
+    })
+
+    await expect(
+      service.changePassword('user-1', {
+        currentPassword: 'errada',
+        newPassword: NEW_PASSWORD
+      })
+    ).rejects.toThrow('A senha atual está incorreta.')
+
+    expect(updatePassword).not.toHaveBeenCalled()
+    expect(cache.increment).toHaveBeenCalledWith(
+      'password-change-failures:user-1',
+      expect.any(Number)
+    )
+    expect(cache.increment).not.toHaveBeenCalledWith(
+      expect.stringContaining('login-failures'),
+      expect.anything()
+    )
+  })
+
+  it('blocks after too many wrong attempts', async () => {
+    const { service, updatePassword } = await build(
+      { hasPassword: true },
+      { failures: 5 }
+    )
+
+    await expect(
+      service.changePassword('user-1', {
+        currentPassword: 'senha-atual-1',
+        newPassword: NEW_PASSWORD
+      })
+    ).rejects.toMatchObject({ statusCode: 429 })
+    expect(updatePassword).not.toHaveBeenCalled()
+  })
+
+  it('refuses a new password equal to the current one', async () => {
+    const { service } = await build({ hasPassword: true })
+
+    await expect(
+      service.changePassword('user-1', {
+        currentPassword: 'senha-atual-1',
+        newPassword: 'senha-atual-1'
+      })
+    ).rejects.toThrow('A nova senha precisa ser diferente da atual.')
+  })
+
+  it('changes the password, revokes sessions, signs the device in again and warns by email', async () => {
+    const { service, updatePassword, deleteTokensByUserId, emailService } =
+      await build({ hasPassword: true })
+
+    const result = await service.changePassword('user-1', {
+      currentPassword: 'senha-atual-1',
+      newPassword: NEW_PASSWORD
+    })
+
+    expect(updatePassword).toHaveBeenCalledWith('user-1', expect.any(String))
+    expect(deleteTokensByUserId).toHaveBeenCalledWith('user-1')
+    expect(result.accessToken).toBe('signed-token')
+    expect(result.wasSet).toBe(false)
+    await new Promise(resolve => setImmediate(resolve))
+    expect(emailService.sendPasswordChangedEmail).toHaveBeenCalledWith(
+      'a@a.com',
+      expect.stringContaining('/forgot-password'),
+      true
+    )
+  })
+
+  it('lets an account without a password set one after a recent sign-in', async () => {
+    const { service, updatePassword } = await build(
+      { hasPassword: false },
+      { recent: true }
+    )
+
+    const result = await service.changePassword('user-1', {
+      newPassword: NEW_PASSWORD
+    })
+
+    expect(updatePassword).toHaveBeenCalled()
+    expect(result.wasSet).toBe(true)
+  })
+
+  it('asks for a new sign-in when setting a password without a recent one', async () => {
+    const { service, updatePassword } = await build(
+      { hasPassword: false },
+      { recent: false }
+    )
+
+    await expect(
+      service.changePassword('user-1', { newPassword: NEW_PASSWORD })
+    ).rejects.toBeInstanceOf(ReauthRequiredError)
+    expect(updatePassword).not.toHaveBeenCalled()
+  })
+
+  it('refuses a password equal to the account email', async () => {
+    const { service } = await build({ hasPassword: false })
+
+    await expect(
+      service.changePassword('user-1', { newPassword: 'a@a.com' })
+    ).rejects.toThrow('A senha não pode ser igual ao email.')
+  })
+})
+
+describe('AuthService.loginWithDiscord with a verified account email', () => {
+  it('keeps the password when the existing account already verified its email', async () => {
+    const linkDiscord = vi.fn().mockResolvedValue({ id: 'user-1' })
+    const authRepository = fakeAuthRepository({
+      findByDiscordId: vi.fn().mockResolvedValue(null),
+      findByEmail: vi.fn().mockResolvedValue({
+        id: 'user-1',
+        googleId: null,
+        discordId: null,
+        emailVerifiedAt: new Date()
+      }),
+      linkDiscord,
+      saveToken: vi.fn()
+    })
+    const service = new AuthService(authRepository, fakeJwt(), fakeCache())
+
+    await service.loginWithDiscord(
+      {
+        id: 'discord-1',
+        email: 'a@a.com',
+        verified: true,
+        username: 'a',
+        avatar: null
+      },
+      true
+    )
+
+    expect(linkDiscord).toHaveBeenCalledWith('user-1', 'discord-1', null, null)
   })
 })

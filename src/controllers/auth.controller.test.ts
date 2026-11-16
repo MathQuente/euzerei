@@ -3,6 +3,7 @@ import { FastifyReply, FastifyRequest } from 'fastify'
 import { AuthController } from './auth.controller'
 import { AuthService } from '../services/auth.service'
 import { ClientError } from '../errors/client-error'
+import { ReauthRequiredError } from '../errors/reauth-required-error'
 
 function fakeReply() {
   const reply = {
@@ -59,5 +60,45 @@ describe('AuthController.refreshTokenHandler', () => {
     await expect(
       controller.refreshTokenHandler(request, fakeReply())
     ).rejects.toBe(error)
+  })
+})
+
+describe('AuthController.changePassword', () => {
+  const body = { newPassword: 'uma-senha-nova-forte' }
+
+  it('answers 403 reauth_required when the service asks for a new sign-in', async () => {
+    const controller = new AuthController({
+      changePassword: vi.fn().mockRejectedValue(new ReauthRequiredError())
+    } as unknown as AuthService)
+    const request = {
+      body,
+      user: { userId: 'user-1' }
+    } as unknown as FastifyRequest
+    const reply = fakeReply()
+
+    await controller.changePassword(request, reply)
+
+    expect(reply.status).toHaveBeenCalledWith(403)
+    expect(reply.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'reauth_required',
+        message: 'Entre novamente para confirmar esta ação.'
+      })
+    )
+  })
+
+  it('rethrows other errors', async () => {
+    const error = new ClientError('A senha atual está incorreta.')
+    const controller = new AuthController({
+      changePassword: vi.fn().mockRejectedValue(error)
+    } as unknown as AuthService)
+    const request = {
+      body: { ...body, currentPassword: 'x' },
+      user: { userId: 'user-1' }
+    } as unknown as FastifyRequest
+
+    await expect(controller.changePassword(request, fakeReply())).rejects.toBe(
+      error
+    )
   })
 })

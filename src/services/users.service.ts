@@ -154,6 +154,7 @@ export class UserService {
         userBanner: user.userBanner,
         email: user.email,
         emailVerified: user.emailVerifiedAt !== null,
+        hasPassword: user.hasPassword,
         gamesAmount: user._count.userGames,
         totalHoursPlayed: totalHoursPlayed ? Number(totalHoursPlayed) : 0,
         steamAccounts: user.accounts

@@ -31,6 +31,7 @@ Table users {
   email String [unique, not null]
   userName String
   password String [not null]
+  hasPassword Boolean [not null, default: true]
   profilePicture String
   userBanner String
   googleId String [unique]

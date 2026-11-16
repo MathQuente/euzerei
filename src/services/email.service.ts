@@ -59,6 +59,29 @@ export class EmailService {
     })
   }
 
+  async sendPasswordChangedEmail(
+    to: string,
+    resetUrl: string,
+    hadPassword: boolean
+  ) {
+    await this.send(
+      to,
+      hadPassword
+        ? 'Sua senha do EuZerei foi alterada'
+        : 'Uma senha foi definida na sua conta do EuZerei',
+      {
+        heading: hadPassword ? 'Sua senha foi alterada' : 'Senha definida',
+        intro: hadPassword
+          ? 'A senha da sua conta foi alterada agora há pouco e os outros dispositivos foram desconectados.'
+          : 'Uma senha foi definida na sua conta agora há pouco e os outros dispositivos foram desconectados.',
+        buttonLabel: 'Redefinir senha',
+        url: resetUrl,
+        footnote:
+          'Se foi você, não precisa fazer nada. Se não foi, redefina a senha agora pelo botão acima.'
+      }
+    )
+  }
+
   async sendEmailVerificationEmail(to: string, verifyUrl: string) {
     await this.send(to, 'Confirme seu email — EuZerei', {
       heading: 'Confirme seu email',

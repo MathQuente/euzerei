@@ -43,6 +43,7 @@ model User {
   email           String         @unique
   userName        String?        @map("user_name")
   password        String
+  hasPassword     Boolean        @default(true) @map("has_password")
   profilePicture  String?        @map("profile_picture")
   userBanner      String?        @map("user_banner")
   googleId        String?        @unique @map("google_id")

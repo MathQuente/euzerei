@@ -5,6 +5,8 @@ import { ClientError } from '../errors/client-error'
 import { TermsRequiredError } from '../errors/terms-required-error'
 import { clearAuthCookies, setAuthCookies } from '../utils/auth-cookies'
 import { respondUnavailable } from '../utils/respond-unavailable'
+import { ReauthRequiredError } from '../errors/reauth-required-error'
+import { sendProblem } from '../utils/problem'
 
 export class AuthController {
   constructor(private authService: AuthService) {}
@@ -89,6 +91,29 @@ export class AuthController {
     await this.authService.verifyEmail(token)
 
     return reply.status(200).send({ message: 'Email confirmado com sucesso.' })
+  }
+
+  async changePassword(request: FastifyRequest, reply: FastifyReply) {
+    const body = AuthSchema.ChangePasswordBodySchema.parse(request.body)
+
+    let result: Awaited<ReturnType<AuthService['changePassword']>>
+    try {
+      result = await this.authService.changePassword(request.user.userId, body)
+    } catch (error) {
+      if (error instanceof ReauthRequiredError) {
+        return sendProblem(reply, 403, {
+          status: 'reauth_required',
+          message: error.message
+        })
+      }
+      throw error
+    }
+
+    const { accessToken, refreshToken, expiresAt, wasSet } = result
+
+    setAuthCookies(reply, accessToken, refreshToken, expiresAt).send({
+      message: wasSet ? 'Senha definida.' : 'Senha alterada.'
+    })
   }
 
   async resendEmailVerification(request: FastifyRequest, reply: FastifyReply) {

@@ -463,3 +463,9 @@ Reasons that are not visible in the code. The code has no explanatory comments; 
 - Cloudinary: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
 - Email: `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM_NAME`
 - Seeds: `SEED_USER_PASSWORD`, `SEED_FOLLOW_USER_ID`, `SEED_LIBRARY_USER_EMAIL`, `SEED_GAME_COUNT`, `SEED_DEMO_SEED`, `SEED_DEMO_FOLLOW_EMAIL`, `SEED_DEMO_AVATAR_STYLE`
+
+## Change password (`PUT /auth/password`)
+
+- `User.hasPassword` (`has_password`, migration `20261115130000_add_has_password_to_users`; backfill: `false` when `google_id`/`discord_id` is set) says whether the account has a real password. Accounts created through Google/Discord, and accounts whose first provider link discarded the password, are `false`. `updatePassword` sets it back to `true`. `/users/me` returns `hasPassword`.
+- `AuthService.changePassword(userId, { currentPassword?, newPassword })`: with a password it needs `currentPassword`; wrong attempts count under `password-change-failures:<userId>` (5 per 15 min, apart from the login counters, so a stolen session cannot lock the owner out of login) and a new password equal to the current one is refused. Without a password it needs a recent sign-in (`RecentAuthService`, 10 min) or throws `ReauthRequiredError`, which `AuthController.changePassword` turns into `403 { status: 'reauth_required' }` (same shape the front already handles for account deletion). After the write it revokes every session (`revokeAllSessions`), issues fresh tokens for this device (the controller sets the cookies), marks a recent auth and sends `EmailService.sendPasswordChangedEmail` without waiting for it.
+- Google/Discord login auto-link: the existing account's password is discarded only when its email is not verified yet (`emailVerifiedAt` null). A verified account keeps its password when a provider is linked by login.

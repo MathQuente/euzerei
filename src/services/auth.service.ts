@@ -3,6 +3,7 @@ import { AuthRepository } from '../repositories/auth.repository'
 import { CacheRepository } from '../repositories/cache.repository'
 import { EmailService } from './email.service'
 import { ClientError } from '../errors/client-error'
+import { ReauthRequiredError } from '../errors/reauth-required-error'
 import { TermsRequiredError } from '../errors/terms-required-error'
 import bcrypt from 'bcrypt'
 import { randomBytes } from 'node:crypto'
@@ -49,6 +50,10 @@ const loginFailuresByIpKey = (email: string, ip: string) =>
 const FAMILIAR_IP_TTL_SECONDS = 30 * 24 * 60 * 60
 const familiarIpKey = (email: string, ip: string) =>
   `login-familiar-ip:${hashToken(normalizeEmail(email))}:${hashToken(ip)}`
+const PASSWORD_CHANGE_MAX_FAILURES = 5
+const PASSWORD_CHANGE_WINDOW_SECONDS = 15 * 60
+const passwordChangeFailuresKey = (userId: string) =>
+  `password-change-failures:${userId}`
 const hasReached = (failures: unknown, limit: number) =>
   typeof failures === 'number' && failures >= limit
 
@@ -327,9 +332,10 @@ export class AuthService {
           throw new ClientError(PROVIDER_ALREADY_LINKED_MESSAGE, 409)
         }
 
-        const discardedPasswordHash = existing.discordId
-          ? null
-          : await this.randomPasswordHash()
+        const discardedPasswordHash =
+          existing.discordId || existing.emailVerifiedAt
+            ? null
+            : await this.randomPasswordHash()
 
         if (discardedPasswordHash) {
           await markSessionsRevoked(this.cacheRepository, existing.id)
@@ -398,17 +404,18 @@ export class AuthService {
 
       const email = normalizeEmail(discordUser.email)
 
-      user = await this.authRepository.findByEmail(email)
+      const existing = await this.authRepository.findByEmail(email)
 
-      if (user) {
-        if (user.discordId) {
+      if (existing) {
+        if (existing.discordId) {
           throw new ClientError(PROVIDER_ALREADY_LINKED_MESSAGE, 409)
         }
 
-        const existingId = user.id
-        const discardedPasswordHash = user.googleId
-          ? null
-          : await this.randomPasswordHash()
+        const existingId = existing.id
+        const discardedPasswordHash =
+          existing.googleId || existing.emailVerifiedAt
+            ? null
+            : await this.randomPasswordHash()
 
         if (discardedPasswordHash) {
           await markSessionsRevoked(this.cacheRepository, existingId)
@@ -562,6 +569,72 @@ export class AuthService {
       this.cacheRepository.del(loginFailuresByEmailKey(email)),
       this.cacheRepository.del(loginFailuresByIpKey(email, ip))
     ])
+  }
+
+  async changePassword(
+    userId: string,
+    input: { currentPassword?: string; newPassword: string }
+  ) {
+    const user = await this.authRepository.findPasswordState(userId)
+    if (!user) throw new ClientError('Conta não encontrada.', 404)
+
+    if (user.hasPassword) {
+      const failuresKey = passwordChangeFailuresKey(userId)
+      const failures = await this.cacheRepository.get(failuresKey)
+      if (hasReached(failures, PASSWORD_CHANGE_MAX_FAILURES)) {
+        throw new ClientError(
+          'Muitas tentativas. Tente novamente mais tarde.',
+          429
+        )
+      }
+
+      if (!input.currentPassword) {
+        throw new ClientError('Informe a senha atual.')
+      }
+
+      const matches = await bcrypt.compare(input.currentPassword, user.password)
+      if (!matches) {
+        await this.cacheRepository.increment(
+          failuresKey,
+          PASSWORD_CHANGE_WINDOW_SECONDS
+        )
+        throw new ClientError('A senha atual está incorreta.')
+      }
+
+      if (await bcrypt.compare(input.newPassword, user.password)) {
+        throw new ClientError('A nova senha precisa ser diferente da atual.')
+      }
+      await this.cacheRepository.del(failuresKey)
+    } else if (!(await this.recentAuthService.isRecent(userId))) {
+      throw new ReauthRequiredError()
+    }
+
+    const lowered = input.newPassword.toLowerCase()
+    const loweredEmail = user.email.toLowerCase()
+    if (lowered === loweredEmail || lowered === loweredEmail.split('@')[0]) {
+      throw new ClientError('A senha não pode ser igual ao email.')
+    }
+
+    const hashedPassword = await bcrypt.hash(input.newPassword, BCRYPT_COST)
+    await this.authRepository.updatePassword(userId, hashedPassword)
+
+    await this.revokeAllSessions(userId)
+    const tokens = await this.generateTokens(userId)
+    await this.recentAuthService.mark(userId)
+
+    void Promise.resolve(
+      this.emailService.sendPasswordChangedEmail(
+        user.email,
+        `${process.env.FRONTEND_URL}/forgot-password`,
+        user.hasPassword
+      )
+    ).catch(err => {
+      console.error('[PasswordChange] notice email failed', {
+        error: err instanceof Error ? err.message : 'unknown error'
+      })
+    })
+
+    return { ...tokens, wasSet: !user.hasPassword }
   }
 
   async logout(refreshToken?: string, accessToken?: string) {

@@ -212,6 +212,7 @@ export class UserRepository {
         id: true,
         email: true,
         emailVerifiedAt: true,
+        hasPassword: true,
         userBanner: true,
         userName: true,
         profilePicture: true,

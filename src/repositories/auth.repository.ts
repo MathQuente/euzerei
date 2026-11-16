@@ -106,6 +106,7 @@ export class AuthRepository {
         profilePicture: data.picture,
         googleId: data.googleId,
         password: data.password,
+        hasPassword: false,
         emailVerifiedAt: new Date(),
         ...termsAcceptance()
       },
@@ -123,6 +124,7 @@ export class AuthRepository {
         profilePicture: true,
         googleId: true,
         discordId: true,
+        emailVerifiedAt: true,
         ...(includePassword ? { password: true } : {})
       }
     })
@@ -164,7 +166,12 @@ export class AuthRepository {
     profilePicture: string | null
   }) {
     return prisma.user.create({
-      data: { ...data, emailVerifiedAt: new Date(), ...termsAcceptance() }
+      data: {
+        ...data,
+        hasPassword: false,
+        emailVerifiedAt: new Date(),
+        ...termsAcceptance()
+      }
     })
   }
 
@@ -177,7 +184,7 @@ export class AuthRepository {
       if (discardedPasswordHash) {
         await tx.user.update({
           where: { id: userId },
-          data: { password: discardedPasswordHash }
+          data: { password: discardedPasswordHash, hasPassword: false }
         })
         await tx.refreshToken.deleteMany({ where: { userId } })
       }
@@ -241,8 +248,15 @@ export class AuthRepository {
   async updatePassword(userId: string, hashedPassword: string) {
     return prisma.user.update({
       where: { id: userId },
-      data: { password: hashedPassword },
+      data: { password: hashedPassword, hasPassword: true },
       select: { email: true }
+    })
+  }
+
+  async findPasswordState(userId: string) {
+    return prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, password: true, hasPassword: true }
     })
   }
 }

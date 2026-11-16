@@ -130,6 +130,20 @@ export async function authRoutes(app: FastifyInstance) {
     async (request, reply) => authController.verifyEmail(request, reply)
   )
 
+  app.withTypeProvider<ZodTypeProvider>().put(
+    '/password',
+    {
+      preHandler: [app.authenticate],
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: '15 minutes'
+        }
+      }
+    },
+    async (request, reply) => authController.changePassword(request, reply)
+  )
+
   app.withTypeProvider<ZodTypeProvider>().post(
     '/resend-verification',
     {
