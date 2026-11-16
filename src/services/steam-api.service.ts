@@ -142,6 +142,31 @@ export class SteamApiService {
     return data.response.games
   }
 
+  static async getRecentlyPlayedGames(
+    steamId: string
+  ): Promise<SteamOwnedGame[]> {
+    const url = `https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v1/?key=${this.getApiKey()}&steamid=${steamId}&format=json`
+    let response: Response
+    try {
+      response = await fetchWithTimeout(url)
+    } catch (err) {
+      throw new SteamApiError(err instanceof Error ? err.message : String(err))
+    }
+
+    if (!response.ok) {
+      throw new SteamApiError(
+        `Steam responded ${response.status} for GetRecentlyPlayedGames`,
+        response.status
+      )
+    }
+
+    const data = (await response.json()) as {
+      response?: { games?: SteamOwnedGame[] }
+    }
+
+    return data.response?.games ?? []
+  }
+
   static async getWishlist(
     steamId: string
   ): Promise<{ appid: number }[] | null> {

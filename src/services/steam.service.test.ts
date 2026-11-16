@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { Prisma } from '../database/prisma-client'
-import { SteamService } from './steam.service'
+import { SteamService, addFamilySharedGames } from './steam.service'
 import { SteamApiError, SteamApiService } from './steam-api.service'
 import { IGDBService } from './igdb.service'
 import { UserRepository } from '../repositories/users.repository'
@@ -57,6 +57,10 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+})
+
+beforeEach(() => {
+  vi.spyOn(SteamApiService, 'getRecentlyPlayedGames').mockResolvedValue([])
 })
 
 describe('SteamService.connectSteam', () => {
@@ -2077,5 +2081,165 @@ describe('SteamService.runImport: endless games that cannot infer a completion',
     expect(addGame).toHaveBeenCalledWith(
       expect.objectContaining({ igdbId: 52826, statusIds: 4 })
     )
+  })
+})
+
+describe('addFamilySharedGames', () => {
+  const NOW = 1_800_000_000
+  const owned = {
+    appid: 1,
+    name: 'Own',
+    playtime_forever: 60,
+    rtime_last_played: 5
+  }
+
+  it('adds a recently played game that the account does not own, as played just now', () => {
+    const borrowed = { appid: 329050, name: 'DMC4 SE', playtime_forever: 894 }
+
+    const result = addFamilySharedGames([owned], [borrowed], NOW)
+
+    expect(result).toEqual([owned, { ...borrowed, rtime_last_played: NOW }])
+  })
+
+  it('keeps the owned data for a game that is on both lists', () => {
+    const result = addFamilySharedGames(
+      [owned],
+      [{ appid: 1, name: 'Own', playtime_forever: 9999 }],
+      NOW
+    )
+
+    expect(result).toEqual([owned])
+  })
+
+  it('returns the very same list when nothing is borrowed', () => {
+    const list = [owned]
+
+    expect(addFamilySharedGames(list, [], NOW)).toBe(list)
+  })
+})
+
+describe('SteamService.runImport with family shared games', () => {
+  beforeEach(() => {
+    vi.spyOn(SteamApiService, 'getWishlist').mockResolvedValue([])
+    vi.spyOn(IGDBService, 'getTimeToBeatByGameIds').mockResolvedValue(new Map())
+    vi.spyOn(SteamApiService, 'getPlayerAchievements').mockResolvedValue({
+      achieved: 4,
+      total: 42,
+      achievedApiNames: [],
+      unlockTimesByName: new Map()
+    })
+    vi.spyOn(
+      SteamApiService,
+      'getGlobalAchievementPercentages'
+    ).mockResolvedValue(null)
+    vi.spyOn(IGDBService, 'getGamesBySteamAppIds').mockResolvedValue([
+      {
+        appId: 329050,
+        game: { id: 20022, name: 'Devil May Cry 4: Special Edition' }
+      }
+    ] as never)
+  })
+
+  function build() {
+    const userRepository = fakeUserRepository({
+      findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+      findUserGame: vi.fn().mockResolvedValue(null),
+      addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 20022 }),
+      createUserGameStats: vi.fn().mockResolvedValue({ completions: 0 }),
+      upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
+    })
+    const service = new SteamService(
+      userRepository,
+      fakeGameCacheService(),
+      platformServiceFor(userRepository)
+    )
+    return { service, userRepository }
+  }
+
+  it('imports a borrowed game that only shows up as recently played, in progress, with its hours', async () => {
+    vi.spyOn(SteamApiService, 'getOwnedGames').mockResolvedValue([])
+    vi.spyOn(SteamApiService, 'getRecentlyPlayedGames').mockResolvedValue([
+      {
+        appid: 329050,
+        name: 'Devil May Cry 4 Special Edition',
+        playtime_forever: 894
+      }
+    ])
+    const { service, userRepository } = build()
+
+    await service.runImport('user-1')
+
+    expect(userRepository.addGameToUserLibrary).toHaveBeenCalledWith(
+      expect.objectContaining({ igdbId: 20022, statusIds: 3 })
+    )
+    expect(lastPlatformRepository.savePlatform).toHaveBeenCalledWith(
+      expect.anything(),
+      'STEAM',
+      'PC',
+      expect.objectContaining({ hoursPlayed: 14.9 }),
+      expect.anything()
+    )
+  })
+
+  it('does not import the same game twice when it is owned and recently played', async () => {
+    vi.spyOn(SteamApiService, 'getOwnedGames').mockResolvedValue([
+      {
+        appid: 329050,
+        name: 'Devil May Cry 4 Special Edition',
+        playtime_forever: 600,
+        rtime_last_played: Math.floor(Date.now() / 1000)
+      }
+    ])
+    vi.spyOn(SteamApiService, 'getRecentlyPlayedGames').mockResolvedValue([
+      {
+        appid: 329050,
+        name: 'Devil May Cry 4 Special Edition',
+        playtime_forever: 894
+      }
+    ])
+    const { service, userRepository } = build()
+
+    await service.runImport('user-1')
+
+    expect(userRepository.addGameToUserLibrary).toHaveBeenCalledTimes(1)
+    expect(lastPlatformRepository.savePlatform).toHaveBeenCalledTimes(1)
+    expect(lastPlatformRepository.savePlatform).toHaveBeenCalledWith(
+      expect.anything(),
+      'STEAM',
+      'PC',
+      expect.objectContaining({ hoursPlayed: 10 }),
+      expect.anything()
+    )
+  })
+
+  it('still imports the owned games when the recently played list cannot be read', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(SteamApiService, 'getOwnedGames').mockResolvedValue([
+      {
+        appid: 329050,
+        name: 'Devil May Cry 4 Special Edition',
+        playtime_forever: 600,
+        rtime_last_played: Math.floor(Date.now() / 1000)
+      }
+    ])
+    vi.spyOn(SteamApiService, 'getRecentlyPlayedGames').mockRejectedValue(
+      new SteamApiError('Steam responded 503 for GetRecentlyPlayedGames', 503)
+    )
+    const { service, userRepository } = build()
+
+    await expect(service.runImport('user-1')).resolves.toBeDefined()
+
+    expect(userRepository.addGameToUserLibrary).toHaveBeenCalledTimes(1)
+  })
+
+  it('survives the API key missing for the extra call', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(SteamApiService, 'getOwnedGames').mockResolvedValue([])
+    vi.spyOn(SteamApiService, 'getRecentlyPlayedGames').mockRejectedValue(
+      new Error('STEAM_API_KEY environment variable is required')
+    )
+    const { service } = build()
+
+    await expect(service.runImport('user-1')).resolves.toBeDefined()
   })
 })

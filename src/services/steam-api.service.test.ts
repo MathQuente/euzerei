@@ -358,3 +358,64 @@ describe('SteamApiService.getOwnedGames', () => {
     expect(error.status).toBeUndefined()
   })
 })
+
+describe('SteamApiService.getRecentlyPlayedGames', () => {
+  function mockGames(body: unknown, ok = true, status = 200) {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok, status, json: () => Promise.resolve(body) })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('asks Steam for the recently played games of the account', async () => {
+    vi.stubEnv('STEAM_API_KEY', 'key')
+    const fetchMock = mockGames({
+      response: {
+        total_count: 1,
+        games: [{ appid: 329050, name: 'DMC4 SE', playtime_forever: 894 }]
+      }
+    })
+
+    const games =
+      await SteamApiService.getRecentlyPlayedGames('76561197960287930')
+
+    expect(games).toEqual([
+      { appid: 329050, name: 'DMC4 SE', playtime_forever: 894 }
+    ])
+    const url = String(fetchMock.mock.calls[0][0])
+    expect(url).toContain('IPlayerService/GetRecentlyPlayedGames/v1')
+    expect(url).toContain('steamid=76561197960287930')
+  })
+
+  it('returns an empty list when nothing was played lately', async () => {
+    vi.stubEnv('STEAM_API_KEY', 'key')
+    mockGames({ response: { total_count: 0 } })
+
+    expect(await SteamApiService.getRecentlyPlayedGames('1')).toEqual([])
+  })
+
+  it('throws a SteamApiError with the status when Steam answers an error', async () => {
+    vi.stubEnv('STEAM_API_KEY', 'key')
+    mockGames({}, false, 503)
+
+    await expect(
+      SteamApiService.getRecentlyPlayedGames('1')
+    ).rejects.toMatchObject({
+      name: 'SteamApiError',
+      status: 503
+    })
+  })
+
+  it('wraps a network failure in a SteamApiError', async () => {
+    vi.stubEnv('STEAM_API_KEY', 'key')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('socket hang up'))
+    )
+
+    await expect(
+      SteamApiService.getRecentlyPlayedGames('1')
+    ).rejects.toBeInstanceOf(SteamApiError)
+  })
+})

@@ -9,6 +9,7 @@ import {
   SteamOwnedGame
 } from './steam-api.service'
 import { IGDBGame } from '../types/igdb'
+import { logError } from '../utils/respond-unavailable'
 import {
   COMPLETION_KEYWORD_PATTERN,
   canInferCompletion,
@@ -54,6 +55,19 @@ const GENERIC_ACCOUNT_ERROR =
 const LIBRARY_PROGRESS_SHARE = 90
 
 const RECENT_PLAY_THRESHOLD_SECONDS = 14 * 24 * 60 * 60
+
+export function addFamilySharedGames(
+  owned: SteamOwnedGame[],
+  recent: SteamOwnedGame[],
+  nowSeconds = Math.floor(Date.now() / 1000)
+): SteamOwnedGame[] {
+  const ownedAppIds = new Set(owned.map(game => game.appid))
+  const borrowed = recent
+    .filter(game => !ownedAppIds.has(game.appid))
+    .map(game => ({ ...game, rtime_last_played: nowSeconds }))
+
+  return borrowed.length === 0 ? owned : [...owned, ...borrowed]
+}
 
 const ACHIEVEMENT_CHECK_CONCURRENCY = 10
 
@@ -346,10 +360,15 @@ export class SteamService {
 
     let ownedGames: SteamOwnedGame[] | null
     let wishlistItemsRaw: { appid: number }[] | null
+    let recentGames: SteamOwnedGame[]
     try {
-      ;[ownedGames, wishlistItemsRaw] = await Promise.all([
+      ;[ownedGames, wishlistItemsRaw, recentGames] = await Promise.all([
         SteamApiService.getOwnedGames(steamId),
-        SteamApiService.getWishlist(steamId)
+        SteamApiService.getWishlist(steamId),
+        SteamApiService.getRecentlyPlayedGames(steamId).catch(err => {
+          logError('[Steam] recently played games failed:', err)
+          return []
+        })
       ])
     } catch (err) {
       if (!(err instanceof SteamApiError)) throw err
@@ -367,6 +386,8 @@ export class SteamService {
         400
       )
     }
+
+    ownedGames = addFamilySharedGames(ownedGames, recentGames)
 
     const wishlist = (wishlistItemsRaw ?? []).map(w => ({
       appid: w.appid,
