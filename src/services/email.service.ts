@@ -77,7 +77,7 @@ export class EmailService {
         buttonLabel: 'Redefinir senha',
         url: resetUrl,
         footnote:
-          'Se foi você, não precisa fazer nada. Se não foi, redefina a senha agora pelo botão acima.'
+          'Se foi você, não precisa fazer nada. Se não foi, redefina a senha agora.'
       }
     )
   }
