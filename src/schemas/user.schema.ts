@@ -34,6 +34,7 @@ export const GetMeResponseSchema = z.object({
     email: z.string(),
     emailVerified: z.boolean(),
     hasPassword: z.boolean(),
+    pendingEmail: z.string().nullable(),
     gamesAmount: z.number(),
     totalHoursPlayed: z.number(),
     steamAccounts: z.array(

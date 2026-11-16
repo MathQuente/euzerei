@@ -82,6 +82,48 @@ export class EmailService {
     )
   }
 
+  async sendEmailChangeConfirmationEmail(to: string, confirmUrl: string) {
+    await this.send(to, 'Confirme seu novo email — EuZerei', {
+      heading: 'Confirme seu novo email',
+      intro:
+        'Recebemos um pedido para usar este endereço no EuZerei. Para concluir a troca, confirme abaixo.',
+      buttonLabel: 'Confirmar novo email',
+      url: confirmUrl,
+      footnote:
+        'O link vale por 24 horas. Se não foi você, ignore este email: nada muda.'
+    })
+  }
+
+  async sendEmailChangeRequestedNoticeEmail(
+    to: string,
+    newEmail: string,
+    accountUrl: string
+  ) {
+    await this.send(to, 'Pediram para trocar o email da sua conta — EuZerei', {
+      heading: 'Pedido para trocar o email',
+      intro: `Alguém pediu para trocar o email da sua conta para ${newEmail}. O email só muda se o link enviado a esse endereço for confirmado.`,
+      buttonLabel: 'Cancelar a troca',
+      url: accountUrl,
+      footnote:
+        'Se não foi você, entre na sua conta, cancele a troca em Configurações > Conta e troque a sua senha.'
+    })
+  }
+
+  async sendEmailChangedNoticeEmail(
+    oldEmail: string,
+    newEmail: string,
+    contactUrl: string
+  ) {
+    await this.send(oldEmail, 'O email da sua conta mudou — EuZerei', {
+      heading: 'O email da sua conta mudou',
+      intro: `O email da sua conta passou de ${oldEmail} para ${newEmail}, e todos os dispositivos foram desconectados.`,
+      buttonLabel: 'Falar com a gente',
+      url: contactUrl,
+      footnote:
+        'Se foi você, não precisa fazer nada. Se não foi, fale com a gente agora.'
+    })
+  }
+
   async sendEmailVerificationEmail(to: string, verifyUrl: string) {
     await this.send(to, 'Confirme seu email — EuZerei', {
       heading: 'Confirme seu email',

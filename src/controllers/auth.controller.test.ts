@@ -102,3 +102,82 @@ describe('AuthController.changePassword', () => {
     )
   })
 })
+
+describe('AuthController e-mail change', () => {
+  const request = (body: unknown = {}) =>
+    ({ body, user: { userId: 'user-1' } }) as unknown as FastifyRequest
+
+  it('answers 403 reauth_required when an account without password needs a new sign-in', async () => {
+    const controller = new AuthController({
+      requestEmailChange: vi.fn().mockRejectedValue(new ReauthRequiredError())
+    } as unknown as AuthService)
+    const reply = fakeReply()
+
+    await controller.requestEmailChange(
+      request({ newEmail: 'novo@a.com' }),
+      reply
+    )
+
+    expect(reply.status).toHaveBeenCalledWith(403)
+    expect(reply.send).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'reauth_required' })
+    )
+  })
+
+  it('returns the pending address and rethrows other errors', async () => {
+    const ok = new AuthController({
+      requestEmailChange: vi
+        .fn()
+        .mockResolvedValue({ pendingEmail: 'novo@a.com' })
+    } as unknown as AuthService)
+    const reply = fakeReply()
+    await ok.requestEmailChange(
+      request({ newEmail: 'Novo@A.com', currentPassword: 'x' }),
+      reply
+    )
+    expect(reply.status).toHaveBeenCalledWith(200)
+    expect(reply.send).toHaveBeenCalledWith({ pendingEmail: 'novo@a.com' })
+
+    const error = new ClientError('Este e-mail já está em uso.', 409)
+    const failing = new AuthController({
+      requestEmailChange: vi.fn().mockRejectedValue(error)
+    } as unknown as AuthService)
+    await expect(
+      failing.requestEmailChange(request({ newEmail: 'a@a.com' }), fakeReply())
+    ).rejects.toBe(error)
+  })
+
+  it('rejects an invalid address before reaching the service', async () => {
+    const requestEmailChange = vi.fn()
+    const controller = new AuthController({
+      requestEmailChange
+    } as unknown as AuthService)
+
+    await expect(
+      controller.requestEmailChange(
+        request({ newEmail: 'nao-e-email' }),
+        fakeReply()
+      )
+    ).rejects.toThrow()
+    expect(requestEmailChange).not.toHaveBeenCalled()
+  })
+
+  it('cancel answers 204 and confirm returns the new address without touching the cookies', async () => {
+    const controller = new AuthController({
+      cancelEmailChange: vi.fn().mockResolvedValue(undefined),
+      confirmEmailChange: vi.fn().mockResolvedValue({ email: 'novo@a.com' })
+    } as unknown as AuthService)
+
+    const cancelReply = fakeReply()
+    await controller.cancelEmailChange(request(), cancelReply)
+    expect(cancelReply.status).toHaveBeenCalledWith(204)
+
+    const confirmReply = fakeReply()
+    await controller.confirmEmailChange(request({ token: 'abc' }), confirmReply)
+    expect(confirmReply.send).toHaveBeenCalledWith({
+      message: 'E-mail alterado.',
+      email: 'novo@a.com'
+    })
+    expect(confirmReply.setCookie).not.toHaveBeenCalled()
+  })
+})

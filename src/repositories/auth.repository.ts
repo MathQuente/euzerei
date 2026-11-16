@@ -151,6 +151,14 @@ export class AuthRepository {
     })
   }
 
+  async updateEmail(userId: string, email: string) {
+    return prisma.user.update({
+      where: { id: userId },
+      data: { email, emailVerifiedAt: new Date() },
+      select: { id: true }
+    })
+  }
+
   async markEmailVerified(userId: string) {
     await prisma.user.updateMany({
       where: { id: userId, emailVerifiedAt: null },

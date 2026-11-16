@@ -145,6 +145,61 @@ export async function authRoutes(app: FastifyInstance) {
   )
 
   app.withTypeProvider<ZodTypeProvider>().post(
+    '/email-change',
+    {
+      preHandler: [app.authenticate],
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: '1 hour'
+        }
+      }
+    },
+    async (request, reply) => authController.requestEmailChange(request, reply)
+  )
+
+  app.withTypeProvider<ZodTypeProvider>().post(
+    '/email-change/resend',
+    {
+      preHandler: [app.authenticate],
+      config: {
+        rateLimit: {
+          max: 6,
+          timeWindow: '1 hour'
+        }
+      }
+    },
+    async (request, reply) => authController.resendEmailChange(request, reply)
+  )
+
+  app.withTypeProvider<ZodTypeProvider>().delete(
+    '/email-change',
+    {
+      preHandler: [app.authenticate],
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: '1 hour'
+        }
+      }
+    },
+    async (request, reply) => authController.cancelEmailChange(request, reply)
+  )
+
+  app.withTypeProvider<ZodTypeProvider>().post(
+    '/email-change/confirm',
+    {
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: '1 minute'
+        }
+      }
+    },
+    async (request, reply) => authController.confirmEmailChange(request, reply)
+  )
+
+  app.withTypeProvider<ZodTypeProvider>().post(
     '/resend-verification',
     {
       preHandler: [app.authenticate],

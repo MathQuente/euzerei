@@ -14,6 +14,14 @@ import { RecentAuthService } from './recent-auth.service'
 import { markSessionsRevoked } from '../utils/session-revocation'
 import { logError } from '../utils/respond-unavailable'
 import { normalizeEmail } from '../utils/normalize-email'
+import { isUniqueViolation } from '../utils/prisma-errors'
+import {
+  EMAIL_CHANGE_TTL_SECONDS,
+  PendingEmailChange,
+  emailChangeCurrentKey,
+  emailChangeKey,
+  parsePendingEmailChange
+} from '../utils/email-change'
 
 const BCRYPT_COST = 12
 
@@ -54,6 +62,15 @@ const PASSWORD_CHANGE_MAX_FAILURES = 5
 const PASSWORD_CHANGE_WINDOW_SECONDS = 15 * 60
 const passwordChangeFailuresKey = (userId: string) =>
   `password-change-failures:${userId}`
+const EMAIL_CHANGE_MAX_REQUESTS_PER_HOUR = 5
+const EMAIL_CHANGE_REQUESTS_WINDOW_SECONDS = 60 * 60
+const emailChangeRequestsKey = (userId: string) =>
+  `email-change-requests:${userId}`
+const passwordResetEpochKey = (userId: string) =>
+  `password-reset-epoch:${userId}`
+const EMAIL_TAKEN_MESSAGE = 'Este e-mail já está em uso.'
+const INVALID_EMAIL_CHANGE_LINK_MESSAGE =
+  'Link de confirmação inválido ou expirado.'
 const hasReached = (failures: unknown, limit: number) =>
   typeof failures === 'number' && failures >= limit
 
@@ -296,11 +313,13 @@ export class AuthService {
   async revokeAllSessions(userId: string) {
     await this.authRepository.deleteTokensByUserId(userId)
     await markSessionsRevoked(this.cacheRepository, userId)
+    await this.cancelEmailChange(userId)
   }
 
   private async markRevokedAfterLink(userId: string) {
     try {
       await markSessionsRevoked(this.cacheRepository, userId)
+      await this.cancelEmailChange(userId)
     } catch (error) {
       logError('Post-link session revocation failed:', error)
     }
@@ -527,7 +546,7 @@ export class AuthService {
 
     await this.cacheRepository.set(
       passwordResetKey(token),
-      user.id,
+      { userId: user.id, at: Date.now() },
       PASSWORD_RESET_TTL_SECONDS
     )
 
@@ -545,14 +564,34 @@ export class AuthService {
     })
   }
 
+  private async validPasswordResetUserId(entry: unknown) {
+    const userId =
+      typeof entry === 'string'
+        ? entry
+        : (entry as { userId?: unknown } | null)?.userId
+    if (typeof userId !== 'string') return null
+
+    const createdAt =
+      typeof entry === 'object' &&
+      entry !== null &&
+      typeof (entry as { at?: unknown }).at === 'number'
+        ? (entry as { at: number }).at
+        : 0
+    const epoch = await this.cacheRepository.get(passwordResetEpochKey(userId))
+    if (typeof epoch === 'number' && createdAt < epoch) return null
+
+    return userId
+  }
+
   async isPasswordResetTokenValid(token: string): Promise<boolean> {
-    return (await this.cacheRepository.get(passwordResetKey(token))) !== null
+    const entry = await this.cacheRepository.get(passwordResetKey(token))
+    return (await this.validPasswordResetUserId(entry)) !== null
   }
 
   async resetPassword(token: string, newPassword: string, ip: string) {
-    const userId = (await this.cacheRepository.getdel(
-      passwordResetKey(token)
-    )) as string | null
+    const userId = await this.validPasswordResetUserId(
+      await this.cacheRepository.getdel(passwordResetKey(token))
+    )
 
     if (!userId) {
       throw new ClientError('Link de redefinição inválido ou expirado.', 400)
@@ -571,6 +610,46 @@ export class AuthService {
     ])
   }
 
+  private async assertCurrentCredentials(
+    user: { id: string; password: string; hasPassword: boolean },
+    currentPassword: string | undefined
+  ) {
+    if (!user.hasPassword) {
+      if (!(await this.recentAuthService.isRecent(user.id))) {
+        throw new ReauthRequiredError()
+      }
+      return
+    }
+
+    const failuresKey = passwordChangeFailuresKey(user.id)
+    const failures = await this.cacheRepository.get(failuresKey)
+    if (hasReached(failures, PASSWORD_CHANGE_MAX_FAILURES)) {
+      throw new ClientError(
+        'Muitas tentativas. Tente novamente mais tarde.',
+        429
+      )
+    }
+
+    if (!currentPassword) {
+      throw new ClientError('Informe a senha atual.')
+    }
+
+    const matches = await bcrypt.compare(currentPassword, user.password)
+    if (!matches) {
+      await this.cacheRepository.increment(
+        failuresKey,
+        PASSWORD_CHANGE_WINDOW_SECONDS
+      )
+      throw new ClientError('A senha atual está incorreta.')
+    }
+  }
+
+  private sendInBackground(label: string, send: () => Promise<unknown>) {
+    void Promise.resolve()
+      .then(send)
+      .catch(err => logError(`[${label}] notice email failed`, err))
+  }
+
   async changePassword(
     userId: string,
     input: { currentPassword?: string; newPassword: string }
@@ -578,35 +657,13 @@ export class AuthService {
     const user = await this.authRepository.findPasswordState(userId)
     if (!user) throw new ClientError('Conta não encontrada.', 404)
 
+    await this.assertCurrentCredentials(user, input.currentPassword)
+
     if (user.hasPassword) {
-      const failuresKey = passwordChangeFailuresKey(userId)
-      const failures = await this.cacheRepository.get(failuresKey)
-      if (hasReached(failures, PASSWORD_CHANGE_MAX_FAILURES)) {
-        throw new ClientError(
-          'Muitas tentativas. Tente novamente mais tarde.',
-          429
-        )
-      }
-
-      if (!input.currentPassword) {
-        throw new ClientError('Informe a senha atual.')
-      }
-
-      const matches = await bcrypt.compare(input.currentPassword, user.password)
-      if (!matches) {
-        await this.cacheRepository.increment(
-          failuresKey,
-          PASSWORD_CHANGE_WINDOW_SECONDS
-        )
-        throw new ClientError('A senha atual está incorreta.')
-      }
-
       if (await bcrypt.compare(input.newPassword, user.password)) {
         throw new ClientError('A nova senha precisa ser diferente da atual.')
       }
-      await this.cacheRepository.del(failuresKey)
-    } else if (!(await this.recentAuthService.isRecent(userId))) {
-      throw new ReauthRequiredError()
+      await this.cacheRepository.del(passwordChangeFailuresKey(userId))
     }
 
     const lowered = input.newPassword.toLowerCase()
@@ -622,19 +679,210 @@ export class AuthService {
     const tokens = await this.generateTokens(userId)
     await this.recentAuthService.mark(userId)
 
-    void Promise.resolve(
+    this.sendInBackground('PasswordChange', () =>
       this.emailService.sendPasswordChangedEmail(
         user.email,
         `${process.env.FRONTEND_URL}/forgot-password`,
         user.hasPassword
       )
-    ).catch(err => {
-      console.error('[PasswordChange] notice email failed', {
-        error: err instanceof Error ? err.message : 'unknown error'
-      })
-    })
+    )
 
     return { ...tokens, wasSet: !user.hasPassword }
+  }
+
+  private async readPendingEmailChange(userId: string) {
+    return parsePendingEmailChange(
+      await this.cacheRepository.get(emailChangeCurrentKey(userId))
+    )
+  }
+
+  private async dropPendingEmailChange(
+    userId: string,
+    pending: PendingEmailChange
+  ) {
+    await this.cacheRepository.del(emailChangeKey(pending.tokenHash))
+    await this.cacheRepository.del(emailChangeCurrentKey(userId))
+  }
+
+  private async consumeEmailChangeQuota(userId: string) {
+    const requests = await this.cacheRepository.increment(
+      emailChangeRequestsKey(userId),
+      EMAIL_CHANGE_REQUESTS_WINDOW_SECONDS
+    )
+    if (requests > EMAIL_CHANGE_MAX_REQUESTS_PER_HOUR) {
+      throw new ClientError(
+        'Muitos pedidos de troca de e-mail. Tente novamente mais tarde.',
+        429
+      )
+    }
+  }
+
+  private async issueEmailChange(userId: string, newEmail: string) {
+    const token = randomToken()
+    const tokenHash = hashToken(token)
+    const previous = await this.readPendingEmailChange(userId)
+
+    await this.cacheRepository.set(
+      emailChangeKey(tokenHash),
+      { userId, newEmail },
+      EMAIL_CHANGE_TTL_SECONDS
+    )
+    await this.cacheRepository.set(
+      emailChangeCurrentKey(userId),
+      { tokenHash, newEmail },
+      EMAIL_CHANGE_TTL_SECONDS
+    )
+
+    const confirmUrl = `${process.env.FRONTEND_URL}/confirm-email-change?token=${token}`
+
+    try {
+      await this.emailService.sendEmailChangeConfirmationEmail(
+        newEmail,
+        confirmUrl
+      )
+    } catch (err) {
+      await this.cacheRepository.del(emailChangeKey(tokenHash))
+      if (previous) {
+        await this.cacheRepository.set(
+          emailChangeCurrentKey(userId),
+          previous,
+          EMAIL_CHANGE_TTL_SECONDS
+        )
+      } else {
+        await this.cacheRepository.del(emailChangeCurrentKey(userId))
+      }
+      logError('[EmailChange] email delivery failed', err)
+      throw new ClientError('Não foi possível enviar o email agora.', 503)
+    }
+
+    const current = await this.readPendingEmailChange(userId)
+    if (current?.tokenHash !== tokenHash) {
+      await this.cacheRepository.del(emailChangeKey(tokenHash))
+      throw new ClientError('A troca de e-mail foi cancelada.', 409)
+    }
+    if (previous && previous.tokenHash !== tokenHash) {
+      await this.cacheRepository.del(emailChangeKey(previous.tokenHash))
+    }
+  }
+
+  async requestEmailChange(
+    userId: string,
+    input: { newEmail: string; currentPassword?: string }
+  ) {
+    const user = await this.authRepository.findPasswordState(userId)
+    if (!user) throw new ClientError('Conta não encontrada.', 404)
+
+    await this.assertCurrentCredentials(user, input.currentPassword)
+    if (user.hasPassword) {
+      await this.cacheRepository.del(passwordChangeFailuresKey(userId))
+    }
+
+    const newEmail = normalizeEmail(input.newEmail)
+    if (newEmail === normalizeEmail(user.email)) {
+      throw new ClientError('Esse já é o e-mail da sua conta.')
+    }
+    await this.consumeEmailChangeQuota(userId)
+    if (await this.authRepository.findByEmail(newEmail)) {
+      throw new ClientError(EMAIL_TAKEN_MESSAGE, 409)
+    }
+
+    await this.issueEmailChange(userId, newEmail)
+
+    this.sendInBackground('EmailChange', () =>
+      this.emailService.sendEmailChangeRequestedNoticeEmail(
+        user.email,
+        newEmail,
+        `${process.env.FRONTEND_URL}/configuracoes/conta`
+      )
+    )
+
+    return { pendingEmail: newEmail }
+  }
+
+  async resendEmailChange(userId: string) {
+    const pending = await this.readPendingEmailChange(userId)
+    if (!pending) {
+      throw new ClientError('Não há troca de e-mail pendente.', 404)
+    }
+
+    if (await this.authRepository.findByEmail(pending.newEmail)) {
+      await this.dropPendingEmailChange(userId, pending)
+      throw new ClientError(EMAIL_TAKEN_MESSAGE, 409)
+    }
+
+    await this.consumeEmailChangeQuota(userId)
+    await this.issueEmailChange(userId, pending.newEmail)
+
+    return { pendingEmail: pending.newEmail }
+  }
+
+  async cancelEmailChange(userId: string) {
+    const pending = await this.readPendingEmailChange(userId)
+    if (pending) await this.dropPendingEmailChange(userId, pending)
+  }
+
+  async confirmEmailChange(token: string) {
+    const tokenHash = hashToken(token)
+    const entry = (await this.cacheRepository.getdel(
+      emailChangeKey(tokenHash)
+    )) as { userId?: unknown; newEmail?: unknown } | null
+
+    if (
+      !entry ||
+      typeof entry.userId !== 'string' ||
+      typeof entry.newEmail !== 'string'
+    ) {
+      throw new ClientError(INVALID_EMAIL_CHANGE_LINK_MESSAGE, 400)
+    }
+    const { userId, newEmail } = entry
+
+    const pending = await this.readPendingEmailChange(userId)
+    if (!pending || pending.tokenHash !== tokenHash) {
+      throw new ClientError(INVALID_EMAIL_CHANGE_LINK_MESSAGE, 400)
+    }
+
+    const user = await this.authRepository.findById(userId)
+    if (!user) throw new ClientError(INVALID_EMAIL_CHANGE_LINK_MESSAGE, 400)
+
+    if (await this.authRepository.findByEmail(newEmail)) {
+      await this.dropPendingEmailChange(userId, pending)
+      throw new ClientError(EMAIL_TAKEN_MESSAGE, 409)
+    }
+
+    try {
+      await this.authRepository.updateEmail(userId, newEmail)
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        await this.dropPendingEmailChange(userId, pending)
+        throw new ClientError(EMAIL_TAKEN_MESSAGE, 409)
+      }
+      throw error
+    }
+
+    await this.cacheRepository.del(emailChangeCurrentKey(userId))
+    const verificationHash = await this.cacheRepository.get(
+      emailVerificationCurrentKey(userId)
+    )
+    if (typeof verificationHash === 'string') {
+      await this.cacheRepository.del(emailVerificationKey(verificationHash))
+    }
+    await this.cacheRepository.del(emailVerificationCurrentKey(userId))
+    await this.cacheRepository.set(
+      passwordResetEpochKey(userId),
+      Date.now(),
+      PASSWORD_RESET_TTL_SECONDS
+    )
+    await this.revokeAllSessions(userId)
+
+    this.sendInBackground('EmailChange', () =>
+      this.emailService.sendEmailChangedNoticeEmail(
+        user.email,
+        newEmail,
+        `${process.env.FRONTEND_URL}/contato`
+      )
+    )
+
+    return { email: newEmail }
   }
 
   async logout(refreshToken?: string, accessToken?: string) {

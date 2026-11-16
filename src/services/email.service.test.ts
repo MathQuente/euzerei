@@ -122,4 +122,46 @@ describe('EmailService', () => {
       new EmailService().sendPasswordResetEmail('a@a.com', 'https://x.test')
     ).rejects.toThrow('535')
   })
+
+  it('sends the new-address confirmation with the link and the 24 hours', async () => {
+    await new EmailService().sendEmailChangeConfirmationEmail(
+      'novo@a.com',
+      'https://x.test/confirm-email-change?token=abc'
+    )
+
+    const message = sendMail.mock.calls[0][0]
+    expect(message.to).toBe('novo@a.com')
+    expect(message.subject).toBe('Confirme seu novo email — EuZerei')
+    expect(message.html).toContain('confirm-email-change?token=abc')
+    expect(message.text).toContain('24 horas')
+  })
+
+  it('tells the old address what was asked and where to cancel', async () => {
+    await new EmailService().sendEmailChangeRequestedNoticeEmail(
+      'dono@a.com',
+      'novo@a.com',
+      'https://x.test/configuracoes/conta'
+    )
+
+    const message = sendMail.mock.calls[0][0]
+    expect(message.to).toBe('dono@a.com')
+    expect(message.text).toContain('novo@a.com')
+    expect(message.html).toContain('https://x.test/configuracoes/conta')
+    expect(message.text).toContain('troque a sua senha')
+  })
+
+  it('tells the old address that the e-mail changed, with both addresses escaped', async () => {
+    await new EmailService().sendEmailChangedNoticeEmail(
+      'dono@a.com',
+      'x<script>@a.com',
+      'https://x.test/contato'
+    )
+
+    const message = sendMail.mock.calls[0][0]
+    expect(message.to).toBe('dono@a.com')
+    expect(message.subject).toBe('O email da sua conta mudou — EuZerei')
+    expect(message.html).toContain('dono@a.com')
+    expect(message.html).not.toContain('<script>')
+    expect(message.html).toContain('x&lt;script&gt;@a.com')
+  })
 })

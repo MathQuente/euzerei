@@ -1042,7 +1042,12 @@ describe('UserService.findById', () => {
 })
 
 describe('UserService.findMe', () => {
-  function build(accounts: unknown[] = []) {
+  function build(
+    accounts: unknown[] = [],
+    cache: CacheRepository = {
+      get: vi.fn().mockResolvedValue(null)
+    } as unknown as CacheRepository
+  ) {
     const userRepository = fakeUserRepository({
       findUserById: vi.fn().mockResolvedValue({
         id: 'user-1',
@@ -1064,7 +1069,9 @@ describe('UserService.findMe', () => {
       userRepository,
       fakeRatingRepository(),
       fakeGameCacheService(),
-      followRepository
+      followRepository,
+      undefined,
+      cache
     )
   }
 
@@ -1106,6 +1113,7 @@ describe('UserService.findMe', () => {
       userName: 'matheus',
       email: 'matheus@a.com',
       emailVerified: false,
+      pendingEmail: null,
       gamesAmount: 3,
       totalHoursPlayed: 12.5,
       steamAccounts: [
@@ -1127,6 +1135,29 @@ describe('UserService.findMe', () => {
     expect(user.steamAccounts).toEqual([])
     expect(user.psnAccounts).toEqual([])
     expect(user.xboxAccounts).toEqual([])
+  })
+
+  it('shows the e-mail waiting for confirmation', async () => {
+    const cache = {
+      get: vi.fn().mockResolvedValue({ tokenHash: 'h', newEmail: 'novo@a.com' })
+    } as unknown as CacheRepository
+
+    const { user } = await build([], cache).findMe('user-1')
+
+    expect(user.pendingEmail).toBe('novo@a.com')
+    expect(cache.get).toHaveBeenCalledWith('email-change-current:user-1')
+  })
+
+  it('still answers when the cache fails, with nothing pending', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const cache = {
+      get: vi.fn().mockRejectedValue(new Error('redis down'))
+    } as unknown as CacheRepository
+
+    const { user } = await build([], cache).findMe('user-1')
+
+    expect(user.pendingEmail).toBeNull()
+    vi.restoreAllMocks()
   })
 })
 

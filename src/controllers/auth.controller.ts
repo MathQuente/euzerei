@@ -93,6 +93,13 @@ export class AuthController {
     return reply.status(200).send({ message: 'Email confirmado com sucesso.' })
   }
 
+  private replyReauthRequired(reply: FastifyReply, error: ReauthRequiredError) {
+    return sendProblem(reply, 403, {
+      status: 'reauth_required',
+      message: error.message
+    })
+  }
+
   async changePassword(request: FastifyRequest, reply: FastifyReply) {
     const body = AuthSchema.ChangePasswordBodySchema.parse(request.body)
 
@@ -101,10 +108,7 @@ export class AuthController {
       result = await this.authService.changePassword(request.user.userId, body)
     } catch (error) {
       if (error instanceof ReauthRequiredError) {
-        return sendProblem(reply, 403, {
-          status: 'reauth_required',
-          message: error.message
-        })
+        return this.replyReauthRequired(reply, error)
       }
       throw error
     }
@@ -114,6 +118,41 @@ export class AuthController {
     setAuthCookies(reply, accessToken, refreshToken, expiresAt).send({
       message: wasSet ? 'Senha definida.' : 'Senha alterada.'
     })
+  }
+
+  async requestEmailChange(request: FastifyRequest, reply: FastifyReply) {
+    const body = AuthSchema.EmailChangeBodySchema.parse(request.body)
+
+    try {
+      const result = await this.authService.requestEmailChange(
+        request.user.userId,
+        body
+      )
+      return reply.status(200).send(result)
+    } catch (error) {
+      if (error instanceof ReauthRequiredError) {
+        return this.replyReauthRequired(reply, error)
+      }
+      throw error
+    }
+  }
+
+  async resendEmailChange(request: FastifyRequest, reply: FastifyReply) {
+    const result = await this.authService.resendEmailChange(request.user.userId)
+    return reply.status(200).send(result)
+  }
+
+  async cancelEmailChange(request: FastifyRequest, reply: FastifyReply) {
+    await this.authService.cancelEmailChange(request.user.userId)
+    return reply.status(204).send()
+  }
+
+  async confirmEmailChange(request: FastifyRequest, reply: FastifyReply) {
+    const { token } = AuthSchema.ConfirmEmailChangeBodySchema.parse(
+      request.body
+    )
+    const { email } = await this.authService.confirmEmailChange(token)
+    return reply.status(200).send({ message: 'E-mail alterado.', email })
   }
 
   async resendEmailVerification(request: FastifyRequest, reply: FastifyReply) {

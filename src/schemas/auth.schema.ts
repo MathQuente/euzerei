@@ -65,6 +65,15 @@ export const ChangePasswordBodySchema = z.object({
   newPassword: PasswordSchema
 })
 
+export const EmailChangeBodySchema = z.object({
+  newEmail: EmailSchema,
+  currentPassword: z.string().min(1).max(1024).optional()
+})
+
+export const ConfirmEmailChangeBodySchema = z.object({
+  token: z.string().min(1).max(256)
+})
+
 export const ResetPasswordBodySchema = z.object({
   token: z.string().min(1).max(256),
   password: PasswordSchema

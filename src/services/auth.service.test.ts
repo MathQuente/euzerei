@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import bcrypt from 'bcrypt'
 import { JWT } from '@fastify/jwt'
 import { AuthService, revokedAccessTokenKey } from './auth.service'
@@ -7,6 +7,8 @@ import { CacheRepository } from '../repositories/cache.repository'
 import { ClientError } from '../errors/client-error'
 import { TermsRequiredError } from '../errors/terms-required-error'
 import { EmailService } from './email.service'
+import { Prisma } from '../database/prisma-client'
+import { hashToken } from '../utils/hash-token'
 import { ReauthRequiredError } from '../errors/reauth-required-error'
 
 function fakeJwt(overrides: Partial<JWT> = {}): JWT {
@@ -573,7 +575,7 @@ describe('AuthService.requestPasswordReset', () => {
     )
     expect(cache.set).toHaveBeenCalledWith(
       expect.stringMatching(/^password-reset:/),
-      'user-1',
+      { userId: 'user-1', at: expect.any(Number) },
       expect.any(Number)
     )
     vi.restoreAllMocks()
@@ -1882,5 +1884,555 @@ describe('AuthService.loginWithDiscord with a verified account email', () => {
     )
 
     expect(linkDiscord).toHaveBeenCalledWith('user-1', 'discord-1', null, null)
+  })
+})
+
+function memoryCache() {
+  const store = new Map<string, unknown>()
+  return {
+    store,
+    get: vi.fn(async (key: string) => store.get(key) ?? null),
+    set: vi.fn(async (key: string, value: unknown) => {
+      store.set(key, value)
+    }),
+    getdel: vi.fn(async (key: string) => {
+      const value = store.get(key) ?? null
+      store.delete(key)
+      return value
+    }),
+    del: vi.fn(async (key: string) => {
+      store.delete(key)
+    }),
+    increment: vi.fn(async (key: string) => {
+      const next = (Number(store.get(key)) || 0) + 1
+      store.set(key, next)
+      return next
+    })
+  } as unknown as CacheRepository & { store: Map<string, unknown> }
+}
+
+describe('AuthService e-mail change', () => {
+  const CURRENT = 'senha-atual-1'
+  const tick = () => new Promise(resolve => setImmediate(resolve))
+
+  async function build(
+    opts: {
+      hasPassword?: boolean
+      recent?: boolean
+      taken?: boolean
+      failSend?: boolean
+    } = {}
+  ) {
+    const hasPassword = opts.hasPassword ?? true
+    const password = await bcrypt.hash(CURRENT, 4)
+    const cache = memoryCache()
+    const repo = {
+      findPasswordState: vi.fn().mockResolvedValue({
+        id: 'user-1',
+        email: 'dono@a.com',
+        password,
+        hasPassword
+      }),
+      findById: vi
+        .fn()
+        .mockResolvedValue({ id: 'user-1', email: 'dono@a.com' }),
+      findByEmail: vi
+        .fn()
+        .mockResolvedValue(opts.taken ? { id: 'other' } : null),
+      updateEmail: vi.fn().mockResolvedValue({ id: 'user-1' }),
+      deleteTokensByUserId: vi.fn()
+    }
+    const mail = {
+      sendEmailChangeConfirmationEmail: vi.fn().mockImplementation(async () => {
+        if (opts.failSend) throw new Error('smtp down')
+      }),
+      sendEmailChangeRequestedNoticeEmail: vi.fn().mockResolvedValue(undefined),
+      sendEmailChangedNoticeEmail: vi.fn().mockResolvedValue(undefined),
+      sendPasswordResetEmail: vi.fn().mockResolvedValue(undefined)
+    }
+    const recent = {
+      isRecent: vi.fn().mockResolvedValue(opts.recent ?? true),
+      mark: vi.fn()
+    }
+    const service = new AuthService(
+      repo as unknown as AuthRepository,
+      fakeJwt(),
+      cache,
+      mail as unknown as EmailService,
+      recent as never
+    )
+    const lastToken = () => {
+      const calls = mail.sendEmailChangeConfirmationEmail.mock.calls
+      return new URL(calls[calls.length - 1][1]).searchParams.get('token')!
+    }
+    return { service, cache, repo, mail, lastToken }
+  }
+
+  beforeEach(() => {
+    vi.stubEnv('FRONTEND_URL', 'http://localhost:5173')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'info').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  it('sends the link to the NEW address, warns the old one and leaves the e-mail alone', async () => {
+    const { service, repo, mail, cache } = await build()
+
+    const result = await service.requestEmailChange('user-1', {
+      newEmail: '  Novo@A.com ',
+      currentPassword: CURRENT
+    })
+    await tick()
+
+    expect(result).toEqual({ pendingEmail: 'novo@a.com' })
+    expect(mail.sendEmailChangeConfirmationEmail).toHaveBeenCalledWith(
+      'novo@a.com',
+      expect.stringContaining('/confirm-email-change?token=')
+    )
+    expect(mail.sendEmailChangeRequestedNoticeEmail).toHaveBeenCalledWith(
+      'dono@a.com',
+      'novo@a.com',
+      'http://localhost:5173/configuracoes/conta'
+    )
+    expect(repo.updateEmail).not.toHaveBeenCalled()
+    expect(cache.store.get('email-change-current:user-1')).toMatchObject({
+      newEmail: 'novo@a.com'
+    })
+  })
+
+  it('rejects a wrong password, counts it and sends nothing', async () => {
+    const { service, mail, cache } = await build()
+
+    await expect(
+      service.requestEmailChange('user-1', {
+        newEmail: 'novo@a.com',
+        currentPassword: 'errada'
+      })
+    ).rejects.toThrow('A senha atual está incorreta.')
+
+    expect(mail.sendEmailChangeConfirmationEmail).not.toHaveBeenCalled()
+    expect(cache.store.get('password-change-failures:user-1')).toBe(1)
+  })
+
+  it('blocks after five wrong passwords, sharing the counter with the password change', async () => {
+    const { service, cache } = await build()
+    cache.store.set('password-change-failures:user-1', 5)
+
+    await expect(
+      service.requestEmailChange('user-1', {
+        newEmail: 'novo@a.com',
+        currentPassword: CURRENT
+      })
+    ).rejects.toMatchObject({ statusCode: 429 })
+  })
+
+  it('refuses the address the account already has', async () => {
+    const { service, mail } = await build()
+
+    await expect(
+      service.requestEmailChange('user-1', {
+        newEmail: 'DONO@a.com',
+        currentPassword: CURRENT
+      })
+    ).rejects.toThrow('Esse já é o e-mail da sua conta.')
+    expect(mail.sendEmailChangeConfirmationEmail).not.toHaveBeenCalled()
+  })
+
+  it('says clearly when the address belongs to someone else', async () => {
+    const { service, mail } = await build({ taken: true })
+
+    await expect(
+      service.requestEmailChange('user-1', {
+        newEmail: 'novo@a.com',
+        currentPassword: CURRENT
+      })
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: 'Este e-mail já está em uso.'
+    })
+    expect(mail.sendEmailChangeConfirmationEmail).not.toHaveBeenCalled()
+  })
+
+  it('asks accounts without a password for a recent sign-in', async () => {
+    const stale = await build({ hasPassword: false, recent: false })
+    await expect(
+      stale.service.requestEmailChange('user-1', { newEmail: 'novo@a.com' })
+    ).rejects.toBeInstanceOf(ReauthRequiredError)
+
+    const fresh = await build({ hasPassword: false, recent: true })
+    await expect(
+      fresh.service.requestEmailChange('user-1', { newEmail: 'novo@a.com' })
+    ).resolves.toEqual({ pendingEmail: 'novo@a.com' })
+  })
+
+  it('a new request replaces the pending one: the first link stops working', async () => {
+    const { service, lastToken, repo } = await build()
+    await service.requestEmailChange('user-1', {
+      newEmail: 'primeiro@a.com',
+      currentPassword: CURRENT
+    })
+    const first = lastToken()
+    await service.requestEmailChange('user-1', {
+      newEmail: 'segundo@a.com',
+      currentPassword: CURRENT
+    })
+    const second = lastToken()
+
+    await expect(service.confirmEmailChange(first)).rejects.toMatchObject({
+      statusCode: 400
+    })
+    expect(repo.updateEmail).not.toHaveBeenCalled()
+    await expect(service.confirmEmailChange(second)).resolves.toEqual({
+      email: 'segundo@a.com'
+    })
+  })
+
+  it('keeps the previous link when the new one cannot be sent', async () => {
+    const ok = await build()
+    await ok.service.requestEmailChange('user-1', {
+      newEmail: 'primeiro@a.com',
+      currentPassword: CURRENT
+    })
+    const first = ok.lastToken()
+    ok.mail.sendEmailChangeConfirmationEmail.mockRejectedValueOnce(
+      new Error('smtp down')
+    )
+
+    await expect(
+      ok.service.requestEmailChange('user-1', {
+        newEmail: 'segundo@a.com',
+        currentPassword: CURRENT
+      })
+    ).rejects.toMatchObject({ statusCode: 503 })
+
+    await expect(ok.service.confirmEmailChange(first)).resolves.toEqual({
+      email: 'primeiro@a.com'
+    })
+  })
+
+  it('does not leave a pending change behind when the e-mail cannot be sent', async () => {
+    const { service, cache } = await build({ failSend: true })
+
+    await expect(
+      service.requestEmailChange('user-1', {
+        newEmail: 'novo@a.com',
+        currentPassword: CURRENT
+      })
+    ).rejects.toMatchObject({ statusCode: 503 })
+
+    expect(cache.store.has('email-change-current:user-1')).toBe(false)
+    expect(
+      [...cache.store.keys()].some(key => key.startsWith('email-change:'))
+    ).toBe(false)
+  })
+
+  it('allows five requests an hour and refuses the sixth', async () => {
+    const { service } = await build()
+    for (let i = 0; i < 5; i++) {
+      await service.requestEmailChange('user-1', {
+        newEmail: `n${i}@a.com`,
+        currentPassword: CURRENT
+      })
+    }
+
+    await expect(
+      service.requestEmailChange('user-1', {
+        newEmail: 'n6@a.com',
+        currentPassword: CURRENT
+      })
+    ).rejects.toMatchObject({ statusCode: 429 })
+  })
+
+  it('resend: needs something pending, issues a new link and kills the old one', async () => {
+    const { service, lastToken, mail } = await build()
+    await expect(service.resendEmailChange('user-1')).rejects.toMatchObject({
+      statusCode: 404
+    })
+
+    await service.requestEmailChange('user-1', {
+      newEmail: 'novo@a.com',
+      currentPassword: CURRENT
+    })
+    const first = lastToken()
+    await expect(service.resendEmailChange('user-1')).resolves.toEqual({
+      pendingEmail: 'novo@a.com'
+    })
+    const second = lastToken()
+
+    expect(second).not.toBe(first)
+    expect(mail.sendEmailChangeConfirmationEmail).toHaveBeenCalledTimes(2)
+    await expect(service.confirmEmailChange(first)).rejects.toMatchObject({
+      statusCode: 400
+    })
+    await expect(service.confirmEmailChange(second)).resolves.toEqual({
+      email: 'novo@a.com'
+    })
+  })
+
+  it('resend: drops the pending change when the address was taken meanwhile', async () => {
+    const { service, repo, cache } = await build()
+    await service.requestEmailChange('user-1', {
+      newEmail: 'novo@a.com',
+      currentPassword: CURRENT
+    })
+    repo.findByEmail.mockResolvedValue({ id: 'other' })
+
+    await expect(service.resendEmailChange('user-1')).rejects.toMatchObject({
+      statusCode: 409
+    })
+    expect(cache.store.has('email-change-current:user-1')).toBe(false)
+  })
+
+  it('cancel removes the pending change, kills its link and can be repeated', async () => {
+    const { service, lastToken, repo } = await build()
+    await service.requestEmailChange('user-1', {
+      newEmail: 'novo@a.com',
+      currentPassword: CURRENT
+    })
+    const token = lastToken()
+
+    await service.cancelEmailChange('user-1')
+    await service.cancelEmailChange('user-1')
+
+    await expect(service.confirmEmailChange(token)).rejects.toMatchObject({
+      statusCode: 400
+    })
+    expect(repo.updateEmail).not.toHaveBeenCalled()
+  })
+
+  it('confirm: changes the e-mail, signs everyone out, warns the old address and uses the link once', async () => {
+    const { service, lastToken, repo, mail, cache } = await build()
+    await service.requestEmailChange('user-1', {
+      newEmail: 'novo@a.com',
+      currentPassword: CURRENT
+    })
+    const token = lastToken()
+    cache.store.set('email-verification-current:user-1', 'old-verification')
+    cache.store.set('email-verification:old-verification', 'user-1')
+
+    await expect(service.confirmEmailChange(token)).resolves.toEqual({
+      email: 'novo@a.com'
+    })
+    await tick()
+
+    expect(repo.updateEmail).toHaveBeenCalledWith('user-1', 'novo@a.com')
+    expect(repo.deleteTokensByUserId).toHaveBeenCalledWith('user-1')
+    expect(cache.store.get('sessions-revoked-at:user-1')).toEqual(
+      expect.any(Number)
+    )
+    expect(cache.store.get('password-reset-epoch:user-1')).toEqual(
+      expect.any(Number)
+    )
+    expect(cache.store.has('email-change-current:user-1')).toBe(false)
+    expect(cache.store.has('email-verification:old-verification')).toBe(false)
+    expect(cache.store.has('email-verification-current:user-1')).toBe(false)
+    expect(mail.sendEmailChangedNoticeEmail).toHaveBeenCalledWith(
+      'dono@a.com',
+      'novo@a.com',
+      'http://localhost:5173/contato'
+    )
+    await expect(service.confirmEmailChange(token)).rejects.toMatchObject({
+      statusCode: 400
+    })
+  })
+
+  it('confirm: an unknown link is refused', async () => {
+    const { service } = await build()
+
+    await expect(service.confirmEmailChange('nada')).rejects.toMatchObject({
+      statusCode: 400,
+      message: 'Link de confirmação inválido ou expirado.'
+    })
+  })
+
+  it('confirm: refuses when the address was taken meanwhile, and when two people race', async () => {
+    const taken = await build()
+    await taken.service.requestEmailChange('user-1', {
+      newEmail: 'novo@a.com',
+      currentPassword: CURRENT
+    })
+    const token = taken.lastToken()
+    taken.repo.findByEmail.mockResolvedValue({ id: 'other' })
+    await expect(taken.service.confirmEmailChange(token)).rejects.toMatchObject(
+      { statusCode: 409 }
+    )
+    expect(taken.repo.updateEmail).not.toHaveBeenCalled()
+
+    const race = await build()
+    await race.service.requestEmailChange('user-1', {
+      newEmail: 'novo@a.com',
+      currentPassword: CURRENT
+    })
+    const raceToken = race.lastToken()
+    race.repo.updateEmail.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('unique', {
+        code: 'P2002',
+        clientVersion: 'test'
+      })
+    )
+    await expect(
+      race.service.confirmEmailChange(raceToken)
+    ).rejects.toMatchObject({ statusCode: 409 })
+    expect(race.repo.deleteTokensByUserId).not.toHaveBeenCalled()
+  })
+
+  it('a reset link requested before the change stops working after it; a later one works', async () => {
+    const { service, lastToken, repo, mail, cache } = await build()
+    repo.findByEmail.mockImplementation(async (email: string) =>
+      email === 'dono@a.com' ? { id: 'user-1', email } : null
+    )
+    ;(repo as Record<string, unknown>).updatePassword = vi
+      .fn()
+      .mockResolvedValue({ email: 'novo@a.com' })
+    ;(repo as Record<string, unknown>).markEmailVerified = vi.fn()
+
+    await service.requestPasswordReset('dono@a.com')
+    const oldLink = mail.sendPasswordResetEmail.mock.calls[0][1] as string
+    const oldToken = new URL(oldLink).searchParams.get('token')!
+    await new Promise(resolve => setTimeout(resolve, 5))
+
+    await service.requestEmailChange('user-1', {
+      newEmail: 'novo@a.com',
+      currentPassword: CURRENT
+    })
+    await service.confirmEmailChange(lastToken())
+    await new Promise(resolve => setTimeout(resolve, 5))
+
+    expect(await service.isPasswordResetTokenValid(oldToken)).toBe(false)
+    await expect(
+      service.resetPassword(oldToken, 'uma-senha-nova-forte', '1.1.1.1')
+    ).rejects.toMatchObject({ statusCode: 400 })
+
+    repo.findByEmail.mockImplementation(async (email: string) =>
+      email === 'novo@a.com' ? { id: 'user-1', email } : null
+    )
+    await service.requestPasswordReset('novo@a.com')
+    const newLink = mail.sendPasswordResetEmail.mock.calls[1][1] as string
+    const newToken = new URL(newLink).searchParams.get('token')!
+    expect(await service.isPasswordResetTokenValid(newToken)).toBe(true)
+    expect(cache.store.get('password-reset-epoch:user-1')).toEqual(
+      expect.any(Number)
+    )
+  })
+
+  it('a reset link in the old plain-text format still works while no e-mail changed', async () => {
+    const { service, repo, cache } = await build()
+    ;(repo as Record<string, unknown>).updatePassword = vi
+      .fn()
+      .mockResolvedValue({ email: 'dono@a.com' })
+    ;(repo as Record<string, unknown>).markEmailVerified = vi.fn()
+    cache.store.set(`password-reset:${hashToken('legado')}`, 'user-1')
+
+    expect(await service.isPasswordResetTokenValid('legado')).toBe(true)
+    await expect(
+      service.resetPassword('legado', 'uma-senha-nova-forte', '1.1.1.1')
+    ).resolves.toBeUndefined()
+  })
+
+  it('a password reset drops the pending change, so the attacker link stops working', async () => {
+    const { service, lastToken, repo, cache } = await build()
+    ;(repo as Record<string, unknown>).updatePassword = vi
+      .fn()
+      .mockResolvedValue({ email: 'dono@a.com' })
+    ;(repo as Record<string, unknown>).markEmailVerified = vi.fn()
+    await service.requestEmailChange('user-1', {
+      newEmail: 'invasor@a.com',
+      currentPassword: CURRENT
+    })
+    const attackerLink = lastToken()
+    cache.store.set(`password-reset:${hashToken('reset')}`, 'user-1')
+
+    await service.resetPassword('reset', 'uma-senha-nova-forte', '1.1.1.1')
+
+    expect(cache.store.has('email-change-current:user-1')).toBe(false)
+    await expect(
+      service.confirmEmailChange(attackerLink)
+    ).rejects.toMatchObject({ statusCode: 400 })
+    expect(repo.updateEmail).not.toHaveBeenCalled()
+  })
+
+  it('a password change drops the pending change too', async () => {
+    const { service, lastToken, repo, cache } = await build()
+    ;(repo as Record<string, unknown>).updatePassword = vi
+      .fn()
+      .mockResolvedValue({ email: 'dono@a.com' })
+    ;(repo as Record<string, unknown>).saveToken = vi.fn()
+    await service.requestEmailChange('user-1', {
+      newEmail: 'invasor@a.com',
+      currentPassword: CURRENT
+    })
+    const attackerLink = lastToken()
+
+    await service.changePassword('user-1', {
+      currentPassword: CURRENT,
+      newPassword: 'uma-senha-nova-forte'
+    })
+
+    expect(cache.store.has('email-change-current:user-1')).toBe(false)
+    await expect(
+      service.confirmEmailChange(attackerLink)
+    ).rejects.toMatchObject({ statusCode: 400 })
+  })
+
+  it('a cancel that lands while the e-mail is being sent kills the new link', async () => {
+    const { service, mail, cache, repo } = await build()
+    mail.sendEmailChangeConfirmationEmail.mockImplementation(async () => {
+      await service.cancelEmailChange('user-1')
+    })
+
+    await expect(
+      service.requestEmailChange('user-1', {
+        newEmail: 'novo@a.com',
+        currentPassword: CURRENT
+      })
+    ).rejects.toMatchObject({ statusCode: 409 })
+
+    expect(
+      [...cache.store.keys()].some(key => /^email-change(-current)?:/.test(key))
+    ).toBe(false)
+    expect(repo.updateEmail).not.toHaveBeenCalled()
+  })
+
+  it('a failed send puts the previous pending change back', async () => {
+    const { service, mail, cache } = await build()
+    await service.requestEmailChange('user-1', {
+      newEmail: 'primeiro@a.com',
+      currentPassword: CURRENT
+    })
+    const before = cache.store.get('email-change-current:user-1')
+    mail.sendEmailChangeConfirmationEmail.mockRejectedValueOnce(
+      new Error('smtp down')
+    )
+
+    await expect(
+      service.requestEmailChange('user-1', {
+        newEmail: 'segundo@a.com',
+        currentPassword: CURRENT
+      })
+    ).rejects.toMatchObject({ statusCode: 503 })
+
+    expect(cache.store.get('email-change-current:user-1')).toEqual(before)
+  })
+
+  it('counts attempts on taken addresses toward the hourly quota', async () => {
+    const { service } = await build({ taken: true })
+    for (let i = 0; i < 5; i++) {
+      await expect(
+        service.requestEmailChange('user-1', {
+          newEmail: `n${i}@a.com`,
+          currentPassword: CURRENT
+        })
+      ).rejects.toMatchObject({ statusCode: 409 })
+    }
+
+    await expect(
+      service.requestEmailChange('user-1', {
+        newEmail: 'n9@a.com',
+        currentPassword: CURRENT
+      })
+    ).rejects.toMatchObject({ statusCode: 429 })
   })
 })

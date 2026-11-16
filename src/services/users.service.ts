@@ -12,6 +12,11 @@ import { GameCacheService } from './game-cache.service'
 import { UserGamePlatformRepository } from '../repositories/user-game-platform.repository'
 import { CacheRepository } from '../repositories/cache.repository'
 import { markSessionsRevoked } from '../utils/session-revocation'
+import {
+  emailChangeCurrentKey,
+  parsePendingEmailChange
+} from '../utils/email-change'
+import { logError } from '../utils/respond-unavailable'
 import { randomInt } from 'crypto'
 import {
   ENDLESS_COMPLETIONS_MESSAGE,
@@ -138,6 +143,18 @@ export class UserService {
     })
   }
 
+  private async readPendingEmail(userId: string) {
+    try {
+      const pending = parsePendingEmailChange(
+        await this.cacheRepository.get(emailChangeCurrentKey(userId))
+      )
+      return pending?.newEmail ?? null
+    } catch (error) {
+      logError('Pending email read failed:', error)
+      return null
+    }
+  }
+
   async findMe(userId: string) {
     const user = await this.requireUser(userId)
 
@@ -145,6 +162,7 @@ export class UserService {
       await this.userRepository.sumUserHoursPlayed(userId)
     const followersCount = await this.followRepository.countFollowers(userId)
     const followingCount = await this.followRepository.countFollowing(userId)
+    const pendingEmail = await this.readPendingEmail(userId)
 
     return {
       user: {
@@ -155,6 +173,7 @@ export class UserService {
         email: user.email,
         emailVerified: user.emailVerifiedAt !== null,
         hasPassword: user.hasPassword,
+        pendingEmail,
         gamesAmount: user._count.userGames,
         totalHoursPlayed: totalHoursPlayed ? Number(totalHoursPlayed) : 0,
         steamAccounts: user.accounts
