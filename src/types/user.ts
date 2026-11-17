@@ -28,4 +28,5 @@ export type PaginatedUserGameRow = {
   playedOn: string[]
   endless: boolean
   hundredPercent: boolean
+  updatedAt?: Date
 }

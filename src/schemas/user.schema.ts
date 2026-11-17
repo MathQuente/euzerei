@@ -60,7 +60,15 @@ export const QueryStringSchema = z.object({
   pageIndex: z.coerce.number().int().min(0).max(10000).default(0),
   query: z.string().max(100).optional(),
   filter: z
-    .enum(['PLAYED', 'PAUSED', 'PLAYING', 'BACKLOG', 'WISHLIST', 'DROPPED'])
+    .enum([
+      'PLAYED',
+      'PAUSED',
+      'PLAYING',
+      'BACKLOG',
+      'WISHLIST',
+      'DROPPED',
+      'QUEUE'
+    ])
     .optional()
     .catch(undefined),
   sortBy: z
@@ -189,7 +197,8 @@ const UserGameEntrySchema = z.object({
   playedOn: z.array(z.string()),
   status: z.string(),
   endless: z.boolean(),
-  hundredPercent: z.boolean()
+  hundredPercent: z.boolean(),
+  updatedAt: z.string().optional()
 })
 
 export const GetAllUserGamesResponseSchema = z.object({

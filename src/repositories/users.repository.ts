@@ -18,6 +18,9 @@ const NOT_WISHLIST = {
   UserGamesStatus: { status: { not: Status.WISHLIST } }
 } satisfies Prisma.UserGameWhereInput
 
+export const QUEUE_FILTER = 'QUEUE'
+const QUEUE_STATUSES: string[] = [Status.BACKLOG, Status.DROPPED]
+
 export class UserRepository {
   async findLibraryStatusesOutsideWishlist(
     igdbIds: number[]
@@ -360,7 +363,7 @@ export class UserRepository {
     uncappedStatuses = []
   }: {
     userId: string
-    filter?: Status
+    filter?: Status | typeof QUEUE_FILTER
     query?: string
     sortBy?: UserGameSortBy
     sortOrder?: UserGameSortOrder
@@ -384,9 +387,12 @@ export class UserRepository {
                 ? Prisma.sql`COALESCE(ug.completed_at, ug.updated_at) ${direction}`
                 : Prisma.sql`ug.updated_at ${direction}`
 
-    const statusFilter = filter
-      ? Prisma.sql`AND ugs.status = ${filter}::"Status"`
-      : Prisma.empty
+    const statusFilter =
+      filter === QUEUE_FILTER
+        ? Prisma.sql`AND ugs.status::text IN (${Prisma.join(QUEUE_STATUSES)})`
+        : filter
+          ? Prisma.sql`AND ugs.status = ${filter}::"Status"`
+          : Prisma.empty
 
     const queryFilter = query
       ? Prisma.sql`AND gc.name ILIKE ${`%${query}%`}`
@@ -409,6 +415,7 @@ export class UserRepository {
         ugs.status                    AS "status",
         ug.endless                    AS "endless",
         ug.hundred_percent            AS "hundredPercent",
+        ug.updated_at                 AS "updatedAt",
         gc.name                       AS "name",
         gc.slug                       AS "slug",
         gc.cover_url                  AS "coverUrl",
@@ -450,6 +457,7 @@ export class UserRepository {
     return prisma.$queryRaw<PaginatedUserGameRow[]>(Prisma.sql`
       SELECT
         ranked."igdbId", ranked."status", ranked."endless", ranked."hundredPercent",
+        ranked."updatedAt",
         ranked."name",
         ranked."slug", ranked."coverUrl", ranked."platforms", ranked."releaseDate",
         ranked."rating", ranked."completions", ranked."hoursPlayed",

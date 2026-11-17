@@ -493,6 +493,159 @@ describe('UserService.findManyUserGames', () => {
     })
   })
 
+  it('lists the queue (backlog plus dropped) with the summed total', async () => {
+    const findManyGamesOfUser = vi.fn().mockResolvedValue([])
+    const service = new UserService(
+      fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findManyGamesOfUser,
+        findGamesCountByStatus: vi
+          .fn()
+          .mockResolvedValue(
+            statusCounts({ BACKLOG: 30, DROPPED: 5, PLAYED: 9 })
+          )
+      }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+
+    const result = await service.findManyUserGames(
+      'user-1',
+      1,
+      'QUEUE',
+      undefined,
+      'dateAdded',
+      'desc'
+    )
+
+    expect(findManyGamesOfUser).toHaveBeenCalledWith(
+      expect.objectContaining({ filter: 'QUEUE', skip: 48, take: 48 })
+    )
+    expect(result.total).toBe(35)
+  })
+
+  it('puts every queue row in one group, keeping the order they came in', async () => {
+    const entry = (igdbId: number, status: string) => ({
+      igdbId,
+      status: status as PaginatedUserGameRow['status'],
+      name: `Jogo ${igdbId}`,
+      slug: `jogo-${igdbId}`,
+      coverUrl: null,
+      platforms: [],
+      releaseDate: null,
+      rating: null,
+      completions: 0,
+      hoursPlayed: 0,
+      playedOn: [],
+      endless: false,
+      hundredPercent: false
+    })
+    const service = new UserService(
+      fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findManyGamesOfUser: vi
+          .fn()
+          .mockResolvedValue([
+            entry(1, 'BACKLOG'),
+            entry(2, 'DROPPED'),
+            entry(3, 'BACKLOG')
+          ]),
+        findGamesCountByStatus: vi
+          .fn()
+          .mockResolvedValue(statusCounts({ BACKLOG: 2, DROPPED: 1 }))
+      }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+
+    const { games } = await service.findManyUserGames(
+      'user-1',
+      0,
+      'QUEUE',
+      undefined
+    )
+
+    expect(games.BACKLOG.map(g => [g.igdbId, g.status])).toEqual([
+      [1, 'BACKLOG'],
+      [2, 'DROPPED'],
+      [3, 'BACKLOG']
+    ])
+    expect(games.DROPPED).toEqual([])
+  })
+
+  it('keeps counting a single status on its own', async () => {
+    const service = new UserService(
+      fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findManyGamesOfUser: vi.fn().mockResolvedValue([]),
+        findGamesCountByStatus: vi
+          .fn()
+          .mockResolvedValue(statusCounts({ BACKLOG: 30, DROPPED: 5 }))
+      }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+
+    const backlog = await service.findManyUserGames(
+      'user-1',
+      0,
+      'BACKLOG',
+      undefined
+    )
+    const dropped = await service.findManyUserGames(
+      'user-1',
+      0,
+      'DROPPED',
+      undefined
+    )
+
+    expect(backlog.total).toBe(30)
+    expect(dropped.total).toBe(5)
+  })
+
+  it('sends the last-change date of each game as an ISO string', async () => {
+    const row = {
+      igdbId: 7,
+      status: 'DROPPED' as PaginatedUserGameRow['status'],
+      name: 'Jogo 7',
+      slug: 'jogo-7',
+      coverUrl: null,
+      platforms: [],
+      releaseDate: null,
+      rating: null,
+      completions: 0,
+      hoursPlayed: 0,
+      playedOn: [],
+      endless: false,
+      hundredPercent: false,
+      updatedAt: new Date('2026-11-10T12:00:00.000Z')
+    }
+    const service = new UserService(
+      fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findManyGamesOfUser: vi.fn().mockResolvedValue([row]),
+        findGamesCountByStatus: vi
+          .fn()
+          .mockResolvedValue(statusCounts({ DROPPED: 1 }))
+      }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+
+    const { games } = await service.findManyUserGames(
+      'user-1',
+      0,
+      undefined,
+      undefined
+    )
+
+    expect(games.DROPPED[0].updatedAt).toBe('2026-11-10T12:00:00.000Z')
+  })
+
   it('groups the paginated rows by status', async () => {
     const rows: PaginatedUserGameRow[] = [
       {

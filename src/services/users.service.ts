@@ -3,7 +3,7 @@ import { UpdateUserDTO } from '../dtos/user.dto'
 import { ClientError } from '../errors/client-error'
 import { isRecordNotFound, isUniqueViolation } from '../utils/prisma-errors'
 import { RatingRepository } from '../repositories/rating.repository'
-import { UserRepository } from '../repositories/users.repository'
+import { QUEUE_FILTER, UserRepository } from '../repositories/users.repository'
 import { FollowRepository } from '../repositories/follow.repository'
 import { FavoriteGameRow, PaginatedUserGameRow } from '../types/user'
 import { IGDBService } from './igdb.service'
@@ -369,7 +369,7 @@ export class UserService {
   async findManyUserGames(
     userId: string,
     pageIndex: number,
-    filter: Status | undefined,
+    filter: Status | typeof QUEUE_FILTER | undefined,
     query: string | undefined,
     sortBy:
       | 'gameName'
@@ -417,8 +417,9 @@ export class UserService {
     }
 
     for (const entry of enriched) {
-      if (entry.status in games) {
-        games[entry.status].push(entry)
+      const group = filter === QUEUE_FILTER ? Status.BACKLOG : entry.status
+      if (group in games) {
+        games[group].push(entry)
       }
     }
 
@@ -435,9 +436,14 @@ export class UserService {
       totalGames: item._count.userGames
     }))
 
-    const total = filter
-      ? (totalPerStatusMapped.find(t => t.status === filter)?.totalGames ?? 0)
-      : totalPerStatusMapped.reduce((acc, t) => acc + t.totalGames, 0)
+    const countOf = (status: string) =>
+      totalPerStatusMapped.find(t => t.status === status)?.totalGames ?? 0
+    const total =
+      filter === QUEUE_FILTER
+        ? countOf(Status.BACKLOG) + countOf(Status.DROPPED)
+        : filter
+          ? countOf(filter)
+          : totalPerStatusMapped.reduce((acc, t) => acc + t.totalGames, 0)
 
     return {
       games,
@@ -509,7 +515,8 @@ export class UserService {
             playedOn: r.playedOn ?? [],
             status: r.status as R['status'],
             endless: r.endless,
-            hundredPercent: r.hundredPercent
+            hundredPercent: r.hundredPercent,
+            updatedAt: r.updatedAt?.toISOString()
           }
         }
 
@@ -529,7 +536,8 @@ export class UserService {
           playedOn: r.playedOn ?? [],
           status: r.status as R['status'],
           endless: r.endless,
-          hundredPercent: r.hundredPercent
+          hundredPercent: r.hundredPercent,
+          updatedAt: r.updatedAt?.toISOString()
         }
       })
       .filter((g): g is NonNullable<typeof g> => g !== null)
