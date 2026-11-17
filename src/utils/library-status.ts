@@ -21,3 +21,5 @@ export const CLEAR_HUNDRED_PERCENT = {
   hundredPercent: false,
   hundredPercentLocked: false
 } as const
+
+export const MAX_FAVORITE_GAMES = 4

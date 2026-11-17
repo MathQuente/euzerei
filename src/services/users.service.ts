@@ -5,7 +5,7 @@ import { isRecordNotFound, isUniqueViolation } from '../utils/prisma-errors'
 import { RatingRepository } from '../repositories/rating.repository'
 import { UserRepository } from '../repositories/users.repository'
 import { FollowRepository } from '../repositories/follow.repository'
-import { PaginatedUserGameRow } from '../types/user'
+import { FavoriteGameRow, PaginatedUserGameRow } from '../types/user'
 import { IGDBService } from './igdb.service'
 import { CloudinaryService } from './cloudinary.service'
 import { GameCacheService } from './game-cache.service'
@@ -20,6 +20,7 @@ import { logError } from '../utils/respond-unavailable'
 import { randomInt } from 'crypto'
 import {
   ENDLESS_COMPLETIONS_MESSAGE,
+  MAX_FAVORITE_GAMES,
   PLAYED_STATUS_ID,
   WISHLIST_STATUS_ID
 } from '../utils/library-status'
@@ -258,6 +259,62 @@ export class UserService {
     }
   }
 
+  async getFavorites(userId: string) {
+    await this.requireUser(userId)
+
+    const rows: FavoriteGameRow[] =
+      await this.userRepository.findFavoriteGameRows(userId)
+    const enriched = await this.fillMissingGameCacheEntries(rows)
+    const mainId = rows.find(row => row.isMain)?.igdbId
+    const games = enriched.map(game => ({
+      ...game,
+      isMain: game.igdbId === mainId
+    }))
+    return { games }
+  }
+
+  async setFavorites(
+    userId: string,
+    igdbIds: number[],
+    mainIgdbId: number | null = null
+  ) {
+    await this.requireUser(userId)
+
+    if (igdbIds.length > MAX_FAVORITE_GAMES) {
+      throw new ClientError(
+        `Escolha no máximo ${MAX_FAVORITE_GAMES} jogos favoritos.`
+      )
+    }
+    if (new Set(igdbIds).size !== igdbIds.length) {
+      throw new ClientError('Um jogo não pode aparecer duas vezes.')
+    }
+
+    if (mainIgdbId !== null && !igdbIds.includes(mainIgdbId)) {
+      throw new ClientError('O jogo com a coroa precisa estar nos favoritos.')
+    }
+
+    const known = await Promise.all(
+      igdbIds.map(igdbId => this.gameCacheService.ensureCached(igdbId))
+    )
+    if (known.some(isKnown => !isKnown)) {
+      throw new ClientError('Um dos jogos escolhidos não foi encontrado.')
+    }
+
+    try {
+      await this.userRepository.replaceFavorites(userId, igdbIds, mainIgdbId)
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ClientError(
+          'Outra alteração dos favoritos estava em andamento. Tente de novo.',
+          409
+        )
+      }
+      throw error
+    }
+
+    return this.getFavorites(userId)
+  }
+
   async setHundredPercent(igdbId: number, userId: string, value: boolean) {
     await this.requireUser(userId)
 
@@ -347,7 +404,8 @@ export class UserService {
         previewPerStatus === undefined ? undefined : [Status.PLAYING]
     })
 
-    const enriched = await this.fillMissingGameCacheEntries(rows)
+    const enriched =
+      await this.fillMissingGameCacheEntries<PaginatedUserGameRow>(rows)
 
     const games: Record<string, typeof enriched> = {
       PLAYED: [],
@@ -418,7 +476,9 @@ export class UserService {
     return { following }
   }
 
-  private async fillMissingGameCacheEntries(rows: PaginatedUserGameRow[]) {
+  private async fillMissingGameCacheEntries<
+    R extends Omit<PaginatedUserGameRow, 'status'> & { status: Status | null }
+  >(rows: R[]) {
     const missing = rows.filter(r => r.name === null)
 
     const fetched =
@@ -447,7 +507,7 @@ export class UserService {
             completions: r.completions,
             hoursPlayed: r.hoursPlayed,
             playedOn: r.playedOn ?? [],
-            status: r.status as string,
+            status: r.status as R['status'],
             endless: r.endless,
             hundredPercent: r.hundredPercent
           }
@@ -467,7 +527,7 @@ export class UserService {
           completions: r.completions,
           hoursPlayed: r.hoursPlayed,
           playedOn: r.playedOn ?? [],
-          status: r.status as string,
+          status: r.status as R['status'],
           endless: r.endless,
           hundredPercent: r.hundredPercent
         }

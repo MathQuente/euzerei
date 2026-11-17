@@ -46,6 +46,7 @@ Table users {
   Rating ratings [not null]
   Review reviews [not null]
   accounts platform_accounts [not null]
+  favoriteGames user_favorite_games [not null]
   following follows [not null]
   followers follows [not null]
 }
@@ -195,6 +196,21 @@ Table user_game_stats {
   userGame user_games [not null]
 }
 
+Table user_favorite_games {
+  id String [pk]
+  userId String [not null]
+  igdbId Int [not null]
+  position Int [not null]
+  isMain Boolean [not null, default: false]
+  createdAt DateTime [default: `now()`, not null]
+  user users [not null]
+
+  indexes {
+    (userId, igdbId) [unique]
+    (userId, position) [unique]
+  }
+}
+
 Enum Platform {
   STEAM
   PLAYSTATION
@@ -287,3 +303,5 @@ Ref: completion_suggestions.userGameId - user_games.id [delete: Cascade]
 Ref: reviews.userId > users.id [delete: Cascade]
 
 Ref: user_game_stats.userGameId - user_games.id [delete: Cascade]
+
+Ref: user_favorite_games.userId > users.id [delete: Cascade]

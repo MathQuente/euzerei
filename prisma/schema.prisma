@@ -58,6 +58,7 @@ model User {
   Rating          Rating[]
   Review          Review[]
   accounts        PlatformAccount[]
+  favoriteGames   UserFavoriteGame[]
 
   following Follow[] @relation("FollowFollower")
   followers Follow[] @relation("FollowFollowing")
@@ -293,4 +294,18 @@ model UserGameStats {
 
   @@unique([userGameId])
   @@map("user_game_stats")
+}
+
+model UserFavoriteGame {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  igdbId    Int      @map("igdb_id")
+  position  Int
+  isMain    Boolean  @default(false) @map("is_main")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, igdbId])
+  @@unique([userId, position])
+  @@map("user_favorite_games")
 }

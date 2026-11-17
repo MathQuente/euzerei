@@ -8,7 +8,8 @@ import {
   UserGamePlatformParamsSchema,
   UserGameCompletedAtUpdateBodySchema,
   ConsoleEnumSchema,
-  UserGamePlayedCountUpdateBodySchema
+  UserGamePlayedCountUpdateBodySchema,
+  SetFavoritesBodySchema
 } from './user.schema'
 
 describe('UpdateUserBodySchema', () => {
@@ -137,5 +138,41 @@ describe('UserGameCompletedAtUpdateBodySchema', () => {
     expect(
       UserGameCompletedAtUpdateBodySchema.safeParse({ completedAt }).success
     ).toBe(accepted)
+  })
+})
+
+describe('SetFavoritesBodySchema', () => {
+  it('accepts a list with or without a crown', () => {
+    expect(SetFavoritesBodySchema.safeParse({ igdbIds: [1, 2] }).success).toBe(
+      true
+    )
+    expect(
+      SetFavoritesBodySchema.safeParse({ igdbIds: [1, 2], mainIgdbId: 2 })
+        .success
+    ).toBe(true)
+    expect(
+      SetFavoritesBodySchema.safeParse({ igdbIds: [1], mainIgdbId: null })
+        .success
+    ).toBe(true)
+  })
+
+  it('refuses a crown that is not in the list', () => {
+    const result = SetFavoritesBodySchema.safeParse({
+      igdbIds: [1, 2],
+      mainIgdbId: 3
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('still refuses more than four, repeated and out-of-range ids', () => {
+    expect(
+      SetFavoritesBodySchema.safeParse({ igdbIds: [1, 2, 3, 4, 5] }).success
+    ).toBe(false)
+    expect(SetFavoritesBodySchema.safeParse({ igdbIds: [1, 1] }).success).toBe(
+      false
+    )
+    expect(
+      SetFavoritesBodySchema.safeParse({ igdbIds: [3000000000] }).success
+    ).toBe(false)
   })
 })

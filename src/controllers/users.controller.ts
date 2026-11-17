@@ -80,6 +80,28 @@ export class UserController {
     return reply.status(200).send({ totalPerStatus, games, total })
   }
 
+  async getFavorites(request: FastifyRequest, reply: FastifyReply) {
+    const { userId } = UserSchema.UserParamsSchema.parse(request.params)
+
+    const { games } = await this.userService.getFavorites(userId)
+
+    return reply.status(200).send({ games })
+  }
+
+  async setFavorites(request: FastifyRequest, reply: FastifyReply) {
+    const { igdbIds, mainIgdbId } = UserSchema.SetFavoritesBodySchema.parse(
+      request.body
+    )
+
+    const { games } = await this.userService.setFavorites(
+      request.user.userId,
+      igdbIds,
+      mainIgdbId ?? null
+    )
+
+    return reply.status(200).send({ games })
+  }
+
   async getUserFollowers(request: FastifyRequest, reply: FastifyReply) {
     const { userId } = UserSchema.UserParamsSchema.parse(request.params)
 

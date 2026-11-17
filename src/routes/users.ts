@@ -157,6 +157,39 @@ export async function userRoutes(app: FastifyInstance) {
   )
 
   app.withTypeProvider<ZodTypeProvider>().get(
+    '/:userId/favorites',
+    {
+      schema: {
+        params: UserSchema.UserParamsSchema,
+        response: {
+          200: UserSchema.GetFavoritesResponseSchema,
+          404: ErrorSchemas.NotFound,
+          500: ErrorSchemas.InternalServerError
+        }
+      }
+    },
+    async (request, reply) => userController.getFavorites(request, reply)
+  )
+
+  app.withTypeProvider<ZodTypeProvider>().put(
+    '/favorites',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        body: UserSchema.SetFavoritesBodySchema,
+        response: {
+          200: UserSchema.GetFavoritesResponseSchema,
+          400: ErrorSchemas.BadRequest,
+          404: ErrorSchemas.NotFound,
+          409: ErrorSchemas.BadRequest,
+          500: ErrorSchemas.InternalServerError
+        }
+      }
+    },
+    async (request, reply) => userController.setFavorites(request, reply)
+  )
+
+  app.withTypeProvider<ZodTypeProvider>().get(
     '/:userId/followers',
     {
       schema: {

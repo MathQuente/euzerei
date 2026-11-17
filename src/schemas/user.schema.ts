@@ -1,3 +1,4 @@
+import { MAX_FAVORITE_GAMES } from '../utils/library-status'
 import z from 'zod'
 import { isConsoleAllowed } from '../utils/platform-consoles'
 
@@ -103,6 +104,23 @@ export const UpdateUserGameEndlessResponseSchema = z.object({
   igdbId: z.number(),
   endless: z.boolean()
 })
+
+export const SetFavoritesBodySchema = z
+  .object({
+    igdbIds: z
+      .array(z.number().int().positive().max(2147483647))
+      .max(MAX_FAVORITE_GAMES, {
+        message: `Escolha no máximo ${MAX_FAVORITE_GAMES} jogos favoritos.`
+      })
+      .refine(ids => new Set(ids).size === ids.length, {
+        message: 'Um jogo não pode aparecer duas vezes.'
+      }),
+    mainIgdbId: z.number().int().positive().max(2147483647).nullish()
+  })
+  .refine(
+    body => body.mainIgdbId == null || body.igdbIds.includes(body.mainIgdbId),
+    { message: 'O jogo com a coroa precisa estar nos favoritos.' }
+  )
 
 export const UserGameHundredPercentBodySchema = z.object({
   hundredPercent: z.boolean()
@@ -337,4 +355,13 @@ export const UserGamePlatformsResponseSchema = z.object({
     completions: z.number(),
     completedAt: z.string().nullable()
   })
+})
+
+export const GetFavoritesResponseSchema = z.object({
+  games: z.array(
+    UserGameEntrySchema.extend({
+      status: z.string().nullable(),
+      isMain: z.boolean()
+    })
+  )
 })

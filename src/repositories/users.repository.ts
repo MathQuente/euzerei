@@ -3,6 +3,7 @@ import { prisma } from '../database/db'
 import { ClientError } from '../errors/client-error'
 import { AddGameDTO, UpdateUserDTO } from '../dtos/user.dto'
 import {
+  FavoriteGameRow,
   PaginatedUserGameRow,
   UserGameSortBy,
   UserGameSortOrder
@@ -529,6 +530,63 @@ export class UserRepository {
       data: { hundredPercent: true }
     })
     return count === 1
+  }
+
+  async findFavoriteGameRows(userId: string): Promise<FavoriteGameRow[]> {
+    return prisma.$queryRaw<FavoriteGameRow[]>(Prisma.sql`
+      SELECT
+        f.igdb_id                     AS "igdbId",
+        f.is_main                     AS "isMain",
+        ugs.status                    AS "status",
+        COALESCE(ug.endless, false)   AS "endless",
+        COALESCE(ug.hundred_percent, false) AS "hundredPercent",
+        gc.name                       AS "name",
+        gc.slug                       AS "slug",
+        gc.cover_url                  AS "coverUrl",
+        gc.platforms                  AS "platforms",
+        gc.release_date               AS "releaseDate",
+        r.value                       AS "rating",
+        COALESCE(ugst.completions, 0) AS "completions",
+        COALESCE(ugst.hours_played, 0)::float AS "hoursPlayed",
+        COALESCE(
+          (SELECT array_agg(p.platform::text ORDER BY p.platform)
+           FROM (
+             SELECT DISTINCT ugp.platform
+             FROM user_game_platforms ugp
+             WHERE ugp.user_game_id = ug.id
+           ) p),
+          '{}'
+        )                             AS "playedOn"
+      FROM user_favorite_games f
+      LEFT JOIN games_cache gc ON gc.igdb_id = f.igdb_id
+      LEFT JOIN user_games ug ON ug.igdb_id = f.igdb_id AND ug.user_id = f.user_id
+      LEFT JOIN users_games_status ugs ON ugs.id = ug.user_games_status_id
+      LEFT JOIN ratings r ON r.igdb_id = f.igdb_id AND r.user_id = f.user_id
+      LEFT JOIN user_game_stats ugst ON ugst.user_game_id = ug.id
+      WHERE f.user_id = ${userId}
+      ORDER BY f.position
+    `)
+  }
+
+  async replaceFavorites(
+    userId: string,
+    igdbIds: number[],
+    mainIgdbId: number | null = null
+  ) {
+    await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`
+      await tx.userFavoriteGame.deleteMany({ where: { userId } })
+      if (igdbIds.length > 0) {
+        await tx.userFavoriteGame.createMany({
+          data: igdbIds.map((igdbId, position) => ({
+            userId,
+            igdbId,
+            position,
+            isMain: igdbId === mainIgdbId
+          }))
+        })
+      }
+    })
   }
 
   async removeGame(igdbId: number, userId: string) {

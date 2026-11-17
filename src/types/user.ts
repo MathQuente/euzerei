@@ -9,6 +9,11 @@ export type UserGameSortBy =
   | 'completedAt'
 export type UserGameSortOrder = 'asc' | 'desc'
 
+export type FavoriteGameRow = Omit<PaginatedUserGameRow, 'status'> & {
+  status: Status | null
+  isMain: boolean
+}
+
 export type PaginatedUserGameRow = {
   igdbId: number
   status: Status

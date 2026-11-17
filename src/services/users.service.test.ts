@@ -1745,3 +1745,209 @@ describe('UserService.updateUserGamePlayedCount', () => {
     })
   })
 })
+
+describe('UserService favorites', () => {
+  function build(
+    overrides: Partial<UserRepository> = {},
+    cache: Partial<GameCacheService> = {}
+  ) {
+    const userRepository = fakeUserRepository({
+      findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+      ...overrides
+    })
+    return new UserService(
+      userRepository,
+      fakeRatingRepository(),
+      fakeGameCacheService(cache),
+      fakeFollowRepository()
+    )
+  }
+
+  const row = (
+    igdbId: number,
+    status: string | null = 'PLAYED',
+    isMain = false
+  ) => ({
+    igdbId,
+    isMain,
+    status,
+    name: `Jogo ${igdbId}`,
+    slug: `jogo-${igdbId}`,
+    coverUrl: null,
+    platforms: [],
+    releaseDate: null,
+    rating: null,
+    completions: 0,
+    hoursPlayed: 0,
+    playedOn: [],
+    endless: false,
+    hundredPercent: false
+  })
+
+  it('returns the favorites in the order of the rows, with no status for games outside the library', async () => {
+    const service = build({
+      findFavoriteGameRows: vi
+        .fn()
+        .mockResolvedValue([row(30, null), row(10), row(20, 'WISHLIST')])
+    })
+
+    const { games } = await service.getFavorites('user-1')
+
+    expect(games.map(g => [g.igdbId, g.status])).toEqual([
+      [30, null],
+      [10, 'PLAYED'],
+      [20, 'WISHLIST']
+    ])
+  })
+
+  it('marks only the crowned game, going through the real card mapper', async () => {
+    const service = build({
+      findFavoriteGameRows: vi
+        .fn()
+        .mockResolvedValue([row(30, null), row(10, 'PLAYED', true), row(20)])
+    })
+
+    const { games } = await service.getFavorites('user-1')
+
+    expect(games.map(g => [g.igdbId, g.isMain])).toEqual([
+      [30, false],
+      [10, true],
+      [20, false]
+    ])
+  })
+
+  it('has no crowned game when none is marked', async () => {
+    const service = build({
+      findFavoriteGameRows: vi.fn().mockResolvedValue([row(1), row(2)])
+    })
+
+    const { games } = await service.getFavorites('user-1')
+
+    expect(games.every(g => g.isMain === false)).toBe(true)
+  })
+
+  it('saves the crowned game along with the list', async () => {
+    const replaceFavorites = vi.fn().mockResolvedValue(undefined)
+    const service = build({
+      replaceFavorites,
+      findFavoriteGameRows: vi
+        .fn()
+        .mockResolvedValue([row(2), row(1, 'PLAYED', true)])
+    })
+
+    const { games } = await service.setFavorites('user-1', [2, 1], 1)
+
+    expect(replaceFavorites).toHaveBeenCalledWith('user-1', [2, 1], 1)
+    expect(games.map(g => g.isMain)).toEqual([false, true])
+  })
+
+  it('refuses a crown on a game that is not in the list', async () => {
+    const replaceFavorites = vi.fn()
+    const service = build({ replaceFavorites })
+
+    await expect(
+      service.setFavorites('user-1', [1, 2], 3)
+    ).rejects.toMatchObject({ statusCode: 400 })
+    expect(replaceFavorites).not.toHaveBeenCalled()
+  })
+
+  it('saves without a crown when none is given', async () => {
+    const replaceFavorites = vi.fn().mockResolvedValue(undefined)
+    const service = build({
+      replaceFavorites,
+      findFavoriteGameRows: vi.fn().mockResolvedValue([row(1)])
+    })
+
+    await service.setFavorites('user-1', [1])
+
+    expect(replaceFavorites).toHaveBeenCalledWith('user-1', [1], null)
+  })
+
+  it('answers an empty list when there are no favorites', async () => {
+    const service = build({
+      findFavoriteGameRows: vi.fn().mockResolvedValue([])
+    })
+
+    await expect(service.getFavorites('user-1')).resolves.toEqual({
+      games: []
+    })
+  })
+
+  it('saves any game of the catalog, even outside the library', async () => {
+    const replaceFavorites = vi.fn().mockResolvedValue(undefined)
+    const ensureCached = vi.fn().mockResolvedValue(true)
+    const service = build(
+      {
+        replaceFavorites,
+        findFavoriteGameRows: vi.fn().mockResolvedValue([row(2, null), row(1)])
+      },
+      { ensureCached }
+    )
+
+    const { games } = await service.setFavorites('user-1', [2, 1])
+
+    expect(ensureCached).toHaveBeenCalledWith(2)
+    expect(ensureCached).toHaveBeenCalledWith(1)
+    expect(replaceFavorites).toHaveBeenCalledWith('user-1', [2, 1], null)
+    expect(games.map(g => g.igdbId)).toEqual([2, 1])
+  })
+
+  it('refuses a game that does not exist in the catalog', async () => {
+    const replaceFavorites = vi.fn()
+    const service = build(
+      { replaceFavorites },
+      {
+        ensureCached: vi
+          .fn()
+          .mockResolvedValueOnce(true)
+          .mockResolvedValueOnce(false)
+      }
+    )
+
+    await expect(
+      service.setFavorites('user-1', [1, 999])
+    ).rejects.toMatchObject({ statusCode: 400 })
+    expect(replaceFavorites).not.toHaveBeenCalled()
+  })
+
+  it('refuses more than four or repeated games', async () => {
+    const replaceFavorites = vi.fn()
+    const service = build({ replaceFavorites })
+
+    await expect(
+      service.setFavorites('user-1', [1, 2, 3, 4, 5])
+    ).rejects.toMatchObject({ statusCode: 400 })
+    await expect(service.setFavorites('user-1', [1, 1])).rejects.toMatchObject({
+      statusCode: 400
+    })
+    expect(replaceFavorites).not.toHaveBeenCalled()
+  })
+
+  it('answers 409 when two saves collide on the position', async () => {
+    const service = build({
+      replaceFavorites: vi.fn().mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test'
+        })
+      )
+    })
+
+    await expect(service.setFavorites('user-1', [1])).rejects.toMatchObject({
+      statusCode: 409
+    })
+  })
+
+  it('accepts clearing every favorite', async () => {
+    const replaceFavorites = vi.fn().mockResolvedValue(undefined)
+    const service = build({
+      replaceFavorites,
+      findFavoriteGameRows: vi.fn().mockResolvedValue([])
+    })
+
+    await expect(service.setFavorites('user-1', [])).resolves.toEqual({
+      games: []
+    })
+    expect(replaceFavorites).toHaveBeenCalledWith('user-1', [], null)
+  })
+})
