@@ -232,7 +232,10 @@ export class UserRepository {
             platform: true,
             externalId: true,
             displayName: true,
-            preferredConsole: true
+            preferredConsole: true,
+            achievementsEarned: true,
+            gamerscore: true,
+            platinumTrophies: true
           },
           orderBy: { createdAt: 'asc' }
         },
@@ -300,6 +303,21 @@ export class UserRepository {
       where: { id: accountId },
       data: { displayName },
       select: { id: true, displayName: true }
+    })
+  }
+
+  async updateAccountStats(
+    accountId: string,
+    stats: {
+      achievementsEarned?: number | null
+      gamerscore?: number | null
+      platinumTrophies?: number | null
+    }
+  ) {
+    return prisma.platformAccount.update({
+      where: { id: accountId },
+      data: { ...stats, statsSyncedAt: new Date() },
+      select: { id: true }
     })
   }
 

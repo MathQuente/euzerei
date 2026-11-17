@@ -113,6 +113,10 @@ Table platform_accounts {
   displayName String [not null]
   preferredConsole Console
   createdAt DateTime [default: `now()`, not null]
+  achievementsEarned Int
+  gamerscore Int
+  platinumTrophies Int
+  statsSyncedAt DateTime
   user users [not null]
   hours platform_account_hours [not null]
 

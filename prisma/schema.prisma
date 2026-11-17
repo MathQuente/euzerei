@@ -181,6 +181,14 @@ model PlatformAccount {
   preferredConsole Console? @map("preferred_console")
   createdAt        DateTime @default(now()) @map("created_at")
 
+  // Totais da loja, gravados ao fim de cada importação (nulos até a primeira
+  // importação depois deste campo existir). Steam: conquistas dos jogos
+  // consultados; Xbox: conquistas e gamerscore; PSN: troféus e platinas.
+  achievementsEarned Int?      @map("achievements_earned")
+  gamerscore         Int?
+  platinumTrophies   Int?      @map("platinum_trophies")
+  statsSyncedAt      DateTime? @map("stats_synced_at")
+
   user  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   hours PlatformAccountHours[]
 

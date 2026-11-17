@@ -37,6 +37,7 @@ import { UserGamePlatformRepository } from '../repositories/user-game-platform.r
 import { consoleFromPsnCategories } from '../utils/console-inference'
 import { MAX_ACCOUNTS_PER_PLATFORM } from '../utils/platform-accounts'
 import { linkPlatformAccount } from './platform-account-link'
+import { saveAccountStats } from './platform-account-stats'
 import {
   PLAYED_STATUS_ID,
   PLAYING_STATUS_ID,
@@ -418,6 +419,26 @@ export class PsnService {
       }
       queuedIgdbIds.add(igdbGame.id)
       toImport.push({ game, igdbGame })
+    }
+
+    let totals: { earned: number; platinum: number } | null = null
+    try {
+      totals = await this.psnApiService.getTrophyTotals(accountId)
+    } catch (error) {
+      console.error('[PSN] could not read trophy totals', {
+        error: error instanceof Error ? error.message : String(error)
+      })
+    }
+    if (totals) {
+      await saveAccountStats(
+        this.userRepository,
+        account.id,
+        {
+          achievementsEarned: totals.earned,
+          platinumTrophies: totals.platinum
+        },
+        'PSN'
+      )
     }
 
     const trophies = await this.loadTrophySummaries(

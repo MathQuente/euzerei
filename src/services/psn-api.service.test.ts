@@ -4,6 +4,7 @@ import {
   getTitleTrophies,
   getUserTrophiesEarnedForTitle,
   getUserPlayedGames,
+  getUserTitles,
   getUserTrophiesForSpecificTitle
 } from 'psn-api'
 import {
@@ -249,5 +250,28 @@ describe('PsnApiService.getEarnedTrophies', () => {
         headerOverrides: { 'Accept-Language': 'en-US' }
       }
     ])
+  })
+})
+
+describe('PsnApiService.getTrophyTotals', () => {
+  const title = (earned: Record<string, number>) => ({
+    trophyTitleName: 'x',
+    earnedTrophies: { bronze: 0, silver: 0, gold: 0, platinum: 0, ...earned }
+  })
+
+  it('sums trophies and platinums over every page, with no IGDB matching', async () => {
+    vi.mocked(getUserTitles)
+      .mockResolvedValueOnce({
+        trophyTitles: [title({ bronze: 10, platinum: 1 }), title({ gold: 3 })],
+        nextOffset: 2
+      } as never)
+      .mockResolvedValueOnce({
+        trophyTitles: [title({ silver: 5, platinum: 1 })],
+        nextOffset: undefined
+      } as never)
+
+    const totals = await new PsnApiService(fakeAuth()).getTrophyTotals('acc')
+
+    expect(totals).toEqual({ earned: 20, platinum: 2 })
   })
 })

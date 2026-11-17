@@ -1178,25 +1178,37 @@ describe('UserService.findById', () => {
             platform: 'XBOX',
             externalId: 'xuid-1',
             displayName: 'Gamer',
-            preferredConsole: 'XBOX_SERIES'
+            preferredConsole: 'XBOX_SERIES',
+            achievementsEarned: 40,
+            gamerscore: 12450,
+            platinumTrophies: null
           },
           {
             id: 's-1',
             platform: 'STEAM',
             externalId: '76561197960287930',
-            displayName: 'MathQuente'
+            displayName: 'MathQuente',
+            achievementsEarned: 1000,
+            gamerscore: null,
+            platinumTrophies: null
           },
           {
             id: 's-2',
             platform: 'STEAM',
             externalId: '76561197960287931',
-            displayName: 'Alt'
+            displayName: 'Alt',
+            achievementsEarned: 284,
+            gamerscore: null,
+            platinumTrophies: null
           },
           {
             id: 'p-1',
             platform: 'PLAYSTATION',
             externalId: 'psn-secret',
-            displayName: 'Player_1'
+            displayName: 'Player_1',
+            achievementsEarned: null,
+            gamerscore: null,
+            platinumTrophies: null
           }
         ],
         _count: { userGames: 3 }
@@ -1226,6 +1238,11 @@ describe('UserService.findById', () => {
       totalHoursPlayed: 12.5,
       hundredPercentCount: 6,
       createdAt: '2026-08-05T12:00:00.000Z',
+      achievementStats: {
+        steam: { achievements: 1284 },
+        xbox: { gamerscore: 12450, achievements: 40 },
+        psn: null
+      },
       stores: {
         steam: ['MathQuente', 'Alt'],
         playstation: ['Player_1'],
@@ -1239,6 +1256,51 @@ describe('UserService.findById', () => {
     expect(JSON.stringify(user)).not.toContain('76561197960287930')
     expect(user).not.toHaveProperty('steamId')
     expect(user).not.toHaveProperty('psnOnlineId')
+  })
+})
+
+describe('UserService.findById achievementStats', () => {
+  async function statsFor(accounts: unknown[]) {
+    const userRepository = fakeUserRepository({
+      findUserById: vi.fn().mockResolvedValue({
+        id: 'user-1',
+        userName: 'matheus',
+        createdAt: new Date('2026-08-05T12:00:00.000Z'),
+        accounts,
+        _count: { userGames: 0 }
+      }),
+      countHundredPercent: vi.fn().mockResolvedValue(0),
+      sumUserHoursPlayed: vi.fn().mockResolvedValue(0)
+    })
+    const service = new UserService(
+      userRepository,
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository({
+        countFollowers: vi.fn().mockResolvedValue(0),
+        countFollowing: vi.fn().mockResolvedValue(0)
+      })
+    )
+    return (await service.findById('user-1')).user.achievementStats
+  }
+
+  const steam = (achievementsEarned: number | null) => ({
+    id: `s-${achievementsEarned}`,
+    platform: 'STEAM',
+    displayName: 'x',
+    achievementsEarned,
+    gamerscore: null,
+    platinumTrophies: null
+  })
+
+  it('shows no number for a store while any of its accounts has none yet', async () => {
+    const stats = await statsFor([steam(500), steam(null)])
+    expect(stats.steam).toBeNull()
+  })
+
+  it('sums the accounts of a store once all of them have a number', async () => {
+    const stats = await statsFor([steam(500), steam(20)])
+    expect(stats.steam).toEqual({ achievements: 520 })
   })
 })
 
@@ -1323,6 +1385,7 @@ describe('UserService.findMe', () => {
       totalHoursPlayed: 12.5,
       hundredPercentCount: 6,
       createdAt: '2026-08-05T12:00:00.000Z',
+      achievementStats: { steam: null, xbox: null, psn: null },
       steamAccounts: [
         { id: 's-1', steamId: '76561197960287930', personaName: 'MathQuente' },
         { id: 's-2', steamId: '76561197960287931', personaName: 'Alt' }

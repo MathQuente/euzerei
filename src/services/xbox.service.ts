@@ -39,6 +39,7 @@ import {
   isXboxPreferredConsole
 } from '../utils/console-inference'
 import { linkPlatformAccount } from './platform-account-link'
+import { saveAccountStats } from './platform-account-stats'
 import {
   PLAYED_STATUS_ID,
   PLAYING_STATUS_ID,
@@ -483,6 +484,19 @@ export class XboxService {
       throw err
     }
     onProgress(PROGRESS_AFTER_TITLES)
+
+    await saveAccountStats(
+      this.userRepository,
+      account.id,
+      {
+        achievementsEarned: titles.reduce(
+          (sum, t) => sum + t.achievementsEarned,
+          0
+        ),
+        gamerscore: titles.reduce((sum, t) => sum + t.gamerscoreEarned, 0)
+      },
+      'Xbox'
+    )
 
     const igdbByTitleId = collapsePortsIntoParent(
       await this.matchTitles(titles)

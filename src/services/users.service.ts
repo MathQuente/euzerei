@@ -167,6 +167,48 @@ export class UserService {
     }
   }
 
+  private achievementStats(
+    accounts: {
+      platform: Platform
+      achievementsEarned: number | null
+      gamerscore: number | null
+      platinumTrophies: number | null
+    }[]
+  ) {
+    // Soma as contas da mesma loja. null = alguma conta dela ainda não tem o
+    // número (não importada depois da migration): melhor "sem número" do que
+    // um total parcial que parece completo.
+    const sum = (
+      platform: Platform,
+      field: 'achievementsEarned' | 'gamerscore' | 'platinumTrophies'
+    ) => {
+      const ofStore = accounts.filter(a => a.platform === platform)
+      const values = ofStore.map(a => a[field])
+      if (values.length === 0 || values.some(v => typeof v !== 'number')) {
+        return null
+      }
+      return (values as number[]).reduce((n, v) => n + v, 0)
+    }
+
+    const steam = sum(Platform.STEAM, 'achievementsEarned')
+    const xboxScore = sum(Platform.XBOX, 'gamerscore')
+    const xboxAchievements = sum(Platform.XBOX, 'achievementsEarned')
+    const psnTrophies = sum(Platform.PLAYSTATION, 'achievementsEarned')
+    const psnPlatinum = sum(Platform.PLAYSTATION, 'platinumTrophies')
+
+    return {
+      steam: steam === null ? null : { achievements: steam },
+      xbox:
+        xboxScore === null
+          ? null
+          : { gamerscore: xboxScore, achievements: xboxAchievements ?? 0 },
+      psn:
+        psnTrophies === null
+          ? null
+          : { trophies: psnTrophies, platinum: psnPlatinum ?? 0 }
+    }
+  }
+
   async findMe(userId: string) {
     const user = await this.requireUser(userId)
 
@@ -200,6 +242,7 @@ export class UserService {
         totalHoursPlayed: totalHoursPlayed ? Number(totalHoursPlayed) : 0,
         hundredPercentCount,
         createdAt: user.createdAt.toISOString(),
+        achievementStats: this.achievementStats(user.accounts),
         steamAccounts: user.accounts
           .filter(account => account.platform === 'STEAM')
           .map(account => ({
@@ -250,6 +293,7 @@ export class UserService {
         hundredPercentCount,
         createdAt: user.createdAt.toISOString(),
         stores: this.storeNames(user.accounts),
+        achievementStats: this.achievementStats(user.accounts),
         followersCount,
         followingCount
       }

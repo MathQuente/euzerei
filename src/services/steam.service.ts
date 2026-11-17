@@ -35,6 +35,7 @@ import { UserGamePlatformService } from './user-game-platform.service'
 import { UserGamePlatformRepository } from '../repositories/user-game-platform.repository'
 import { mapWithConcurrency } from '../utils/map-with-concurrency'
 import { linkPlatformAccount } from './platform-account-link'
+import { saveAccountStats } from './platform-account-stats'
 import type { CompletionSuggestionRecorder } from './completion-suggestion.service'
 import { STEAM_CONSOLE } from '../utils/console-inference'
 import {
@@ -490,6 +491,26 @@ export class SteamService {
         return { achievements, globalPercentages, schema, communityTexts }
       }
     )
+
+    // Só dos jogos que a importação já consultou (casados com o IGDB, com
+    // horas e com sinal de conclusão): o total real custaria 1 chamada por jogo.
+    // Só grava se alguma consulta trouxe conquistas: a API devolve null tanto
+    // para "jogo sem conquistas" quanto para erro/429, e um total 0 vindo de
+    // uma falha apagaria o número bom da importação anterior.
+    const consulted = achievementData.filter(data => data?.achievements)
+    if (consulted.length > 0) {
+      await saveAccountStats(
+        this.userRepository,
+        accountId,
+        {
+          achievementsEarned: consulted.reduce(
+            (sum, data) => sum + (data?.achievements?.achieved ?? 0),
+            0
+          )
+        },
+        'Steam'
+      )
+    }
 
     let imported = 0
     let updated = 0

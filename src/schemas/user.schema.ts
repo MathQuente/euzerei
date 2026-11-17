@@ -13,6 +13,14 @@ export const UserParamsSchema = z.object({
   userId: z.uuid()
 })
 
+const AchievementStatsSchema = z.object({
+  steam: z.object({ achievements: z.number() }).nullable(),
+  xbox: z
+    .object({ gamerscore: z.number(), achievements: z.number() })
+    .nullable(),
+  psn: z.object({ trophies: z.number(), platinum: z.number() }).nullable()
+})
+
 export const GetUserResponseSchema = z.object({
   user: z.object({
     id: z.uuid(),
@@ -23,6 +31,7 @@ export const GetUserResponseSchema = z.object({
     totalHoursPlayed: z.number(),
     hundredPercentCount: z.number(),
     createdAt: z.string(),
+    achievementStats: AchievementStatsSchema,
     stores: z.object({
       steam: z.array(z.string()),
       playstation: z.array(z.string()),
@@ -49,6 +58,7 @@ export const GetMeResponseSchema = z.object({
     totalHoursPlayed: z.number(),
     hundredPercentCount: z.number(),
     createdAt: z.string(),
+    achievementStats: AchievementStatsSchema,
     steamAccounts: z.array(
       z.object({ id: z.string(), steamId: z.string(), personaName: z.string() })
     ),

@@ -13,6 +13,8 @@ import { PsnAuthService } from './psn-auth.service'
 import { normalizeGameName } from '../utils/normalize-game-name'
 
 const PLAYED_GAMES_PAGE_SIZE = 200
+// Trava de segurança: 50 páginas de 800 títulos já passam de qualquer conta.
+const MAX_TROPHY_TITLE_PAGES = 50
 const TROPHY_TITLES_PAGE_SIZE = 800
 const SPECIFIC_TITLE_BATCH_SIZE = 5
 const GAME_CATEGORIES = new Set(['ps4_game', 'ps5_native_game', 'unknown'])
@@ -185,6 +187,40 @@ export class PsnApiService {
     }
 
     return games
+  }
+
+  // Soma de todos os títulos da conta, sem depender de casarem com o IGDB.
+  async getTrophyTotals(
+    accountId: string
+  ): Promise<{ earned: number; platinum: number }> {
+    let earned = 0
+    let platinum = 0
+    let offset = 0
+
+    for (let pages = 0; pages < MAX_TROPHY_TITLE_PAGES; pages++) {
+      const page = await this.call(auth =>
+        getUserTitles(auth, accountId, {
+          limit: TROPHY_TITLES_PAGE_SIZE,
+          offset
+        })
+      )
+
+      for (const title of page.trophyTitles) {
+        earned += countTrophies(title.earnedTrophies)
+        platinum += title.earnedTrophies?.platinum ?? 0
+      }
+
+      if (
+        page.nextOffset == null ||
+        page.trophyTitles.length === 0 ||
+        page.nextOffset <= offset
+      ) {
+        break
+      }
+      offset = page.nextOffset
+    }
+
+    return { earned, platinum }
   }
 
   async getTrophySummariesByName(
