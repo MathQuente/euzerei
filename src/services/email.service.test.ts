@@ -164,4 +164,27 @@ describe('EmailService', () => {
     expect(message.html).not.toContain('<script>')
     expect(message.html).toContain('x&lt;script&gt;@a.com')
   })
+
+  it('warns when a sign-in provider is linked or unlinked, with the link to change the password', async () => {
+    const mail = new EmailService()
+    await mail.sendProviderChangedNoticeEmail(
+      'dono@a.com',
+      'Google',
+      true,
+      'https://x.test/configuracoes/seguranca'
+    )
+    await mail.sendProviderChangedNoticeEmail(
+      'dono@a.com',
+      'Discord',
+      false,
+      'https://x.test/configuracoes/seguranca'
+    )
+
+    const [linked, unlinked] = sendMail.mock.calls.map(call => call[0])
+    expect(linked.subject).toBe('Google vinculado à sua conta — EuZerei')
+    expect(linked.text).toContain('pode ser usado para entrar')
+    expect(unlinked.subject).toBe('Discord desvinculado da sua conta — EuZerei')
+    expect(unlinked.text).toContain('desvinculado da sua conta do EuZerei')
+    expect(unlinked.html).toContain('https://x.test/configuracoes/seguranca')
+  })
 })

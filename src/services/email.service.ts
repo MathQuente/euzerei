@@ -124,6 +124,30 @@ export class EmailService {
     })
   }
 
+  async sendProviderChangedNoticeEmail(
+    to: string,
+    provider: 'Google' | 'Discord',
+    linked: boolean,
+    changePasswordUrl: string
+  ) {
+    await this.send(
+      to,
+      linked
+        ? `${provider} vinculado à sua conta — EuZerei`
+        : `${provider} desvinculado da sua conta — EuZerei`,
+      {
+        heading: linked ? `${provider} vinculado` : `${provider} desvinculado`,
+        intro: linked
+          ? `O ${provider} foi vinculado à sua conta do EuZerei e agora pode ser usado para entrar.`
+          : `O ${provider} foi desvinculado da sua conta do EuZerei.`,
+        buttonLabel: 'Trocar a senha',
+        url: changePasswordUrl,
+        footnote:
+          'Se foi você, não precisa fazer nada. Se não foi, troque a sua senha agora.'
+      }
+    )
+  }
+
   async sendEmailVerificationEmail(to: string, verifyUrl: string) {
     await this.send(to, 'Confirme seu email — EuZerei', {
       heading: 'Confirme seu email',

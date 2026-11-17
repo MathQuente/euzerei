@@ -34,6 +34,8 @@ export const GetMeResponseSchema = z.object({
     email: z.string(),
     emailVerified: z.boolean(),
     hasPassword: z.boolean(),
+    googleLinked: z.boolean(),
+    discordLinked: z.boolean(),
     pendingEmail: z.string().nullable(),
     gamesAmount: z.number(),
     totalHoursPlayed: z.number(),

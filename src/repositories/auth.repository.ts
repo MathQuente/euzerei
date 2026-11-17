@@ -4,6 +4,7 @@ import { ClientError } from '../errors/client-error'
 import { CreateUserDTO } from '../dtos/user.dto'
 import { hashToken } from '../utils/hash-token'
 import { termsAcceptance } from '../utils/terms'
+import type { OAuthProvider } from '../services/auth.service'
 
 const MAX_SESSIONS_PER_USER = 10
 
@@ -149,6 +150,56 @@ export class AuthRepository {
       where: { id: userId },
       select: { id: true, email: true, emailVerifiedAt: true }
     })
+  }
+
+  async findProviderState(userId: string) {
+    return prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        hasPassword: true,
+        googleId: true,
+        discordId: true
+      }
+    })
+  }
+
+  async attachProvider(
+    userId: string,
+    provider: OAuthProvider,
+    providerId: string
+  ) {
+    const { count } = await prisma.user.updateMany({
+      where:
+        provider === 'google'
+          ? { id: userId, googleId: null }
+          : { id: userId, discordId: null },
+      data:
+        provider === 'google'
+          ? { googleId: providerId }
+          : { discordId: providerId }
+    })
+    return count === 1
+  }
+
+  async detachProviderKeepingAMethod(userId: string, provider: OAuthProvider) {
+    const { count } = await prisma.user.updateMany({
+      where:
+        provider === 'google'
+          ? {
+              id: userId,
+              googleId: { not: null },
+              OR: [{ hasPassword: true }, { discordId: { not: null } }]
+            }
+          : {
+              id: userId,
+              discordId: { not: null },
+              OR: [{ hasPassword: true }, { googleId: { not: null } }]
+            },
+      data: provider === 'google' ? { googleId: null } : { discordId: null }
+    })
+    return count === 1
   }
 
   async updateEmail(userId: string, email: string) {

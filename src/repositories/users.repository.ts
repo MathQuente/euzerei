@@ -213,6 +213,8 @@ export class UserRepository {
         email: true,
         emailVerifiedAt: true,
         hasPassword: true,
+        googleId: true,
+        discordId: true,
         userBanner: true,
         userName: true,
         profilePicture: true,

@@ -1,9 +1,10 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { FastifyReply, FastifyRequest } from 'fastify'
 import { AuthController } from './auth.controller'
 import { AuthService } from '../services/auth.service'
 import { ClientError } from '../errors/client-error'
 import { ReauthRequiredError } from '../errors/reauth-required-error'
+import { ProviderLinkError } from '../errors/provider-link-error'
 
 function fakeReply() {
   const reply = {
@@ -179,5 +180,169 @@ describe('AuthController e-mail change', () => {
       email: 'novo@a.com'
     })
     expect(confirmReply.setCookie).not.toHaveBeenCalled()
+  })
+})
+
+describe('AuthController provider callbacks', () => {
+  const profileFetch = (profile: unknown) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => profile })
+    )
+  const oauth2 = {
+    getNewAccessTokenUsingRefreshToken: vi
+      .fn()
+      .mockResolvedValue({ access_token: 'tok' }),
+    getAccessTokenFromAuthorizationCodeFlow: vi
+      .fn()
+      .mockResolvedValue({ access_token: 'tok' })
+  }
+  const request = (userId: string | null) =>
+    ({
+      cookies: { accessToken: 'tok' },
+      query: { code: 'c', state: 's' },
+      server: { googleOAuth2: oauth2, discordOAuth2: oauth2 },
+      user: userId ? { userId, tokenType: 'access' } : undefined
+    }) as unknown as FastifyRequest
+
+  function reply() {
+    const r = { redirect: vi.fn(() => r), setCookie: vi.fn(() => r) }
+    return r as unknown as FastifyReply & { redirect: ReturnType<typeof vi.fn> }
+  }
+
+  beforeEach(() => {
+    vi.stubEnv('FRONTEND_URL', 'http://localhost:5173')
+    vi.stubEnv('GOOGLE_OAUTH_CALLBACK_URL', 'http://x/cb')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  it('links instead of signing in when the state was made by a logged in user', async () => {
+    profileFetch({ sub: 'g-1', email: 'a@a.com', email_verified: true })
+    const linkProviderToUser = vi.fn().mockResolvedValue(undefined)
+    const loginWithGoogle = vi.fn()
+    const controller = new AuthController({
+      linkProviderToUser,
+      loginWithGoogle
+    } as unknown as AuthService)
+    const r = reply()
+
+    await controller.googleCallback(request('user-1'), r, {
+      acceptedTerms: false,
+      linkUserId: 'user-1'
+    })
+
+    expect(linkProviderToUser).toHaveBeenCalledWith(
+      'user-1',
+      'google',
+      'g-1',
+      true
+    )
+    expect(loginWithGoogle).not.toHaveBeenCalled()
+    expect(r.redirect).toHaveBeenCalledWith(
+      'http://localhost:5173/configuracoes/seguranca?vinculado=google'
+    )
+  })
+
+  it('does not link when the browser is signed in as someone else, or not at all', async () => {
+    profileFetch({ sub: 'g-1', email: 'a@a.com', email_verified: true })
+    const linkProviderToUser = vi.fn()
+    const controller = new AuthController({
+      linkProviderToUser
+    } as unknown as AuthService)
+
+    for (const session of ['other-user', null]) {
+      const r = reply()
+      await controller.googleCallback(request(session), r, {
+        acceptedTerms: false,
+        linkUserId: 'user-1'
+      })
+      expect(r.redirect).toHaveBeenCalledWith(
+        'http://localhost:5173/configuracoes/seguranca?vinculo_erro=sessao&provedor=google'
+      )
+    }
+    expect(linkProviderToUser).not.toHaveBeenCalled()
+  })
+
+  it('goes back to the settings page with the reason when the identity belongs to another account', async () => {
+    profileFetch({ id: 'd-1', email: 'a@a.com', verified: true })
+    const controller = new AuthController({
+      linkProviderToUser: vi
+        .fn()
+        .mockRejectedValue(
+          new ProviderLinkError('ja_ligado_outra_conta', 'ocupado')
+        )
+    } as unknown as AuthService)
+    const r = reply()
+
+    await controller.discordCallback(request('user-1'), r, {
+      acceptedTerms: false,
+      linkUserId: 'user-1'
+    })
+
+    expect(r.redirect).toHaveBeenCalledWith(
+      'http://localhost:5173/configuracoes/seguranca?vinculo_erro=ja_ligado_outra_conta&provedor=discord'
+    )
+  })
+
+  it('sends a provider failure during a link back to the settings page, not to the login', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    )
+    const controller = new AuthController({} as unknown as AuthService)
+    const r = reply()
+
+    await controller.googleCallback(request('user-1'), r, {
+      acceptedTerms: false,
+      linkUserId: 'user-1'
+    })
+
+    expect(r.redirect).toHaveBeenCalledWith(
+      'http://localhost:5173/configuracoes/seguranca?vinculo_erro=falhou&provedor=google'
+    )
+  })
+
+  it('still signs in as before when the state is not a link', async () => {
+    profileFetch({ sub: 'g-1', email: 'a@a.com', email_verified: true })
+    const loginWithGoogle = vi.fn().mockResolvedValue({
+      accessToken: 'a',
+      refreshToken: 'r',
+      expiresAt: new Date()
+    })
+    const controller = new AuthController({
+      loginWithGoogle
+    } as unknown as AuthService)
+    const r = reply()
+
+    await controller.googleCallback(request(null), r, { acceptedTerms: true })
+
+    expect(loginWithGoogle).toHaveBeenCalledWith(
+      expect.objectContaining({ sub: 'g-1' }),
+      true
+    )
+  })
+
+  it('does not link when the session is gone by the time the provider answers', async () => {
+    profileFetch({ sub: 'g-1', email: 'a@a.com', email_verified: true })
+    const linkProviderToUser = vi.fn()
+    const controller = new AuthController({
+      linkProviderToUser
+    } as unknown as AuthService)
+    const r = reply()
+
+    await controller.googleCallback(request(null), r, {
+      acceptedTerms: false,
+      linkUserId: 'user-1'
+    })
+
+    expect(linkProviderToUser).not.toHaveBeenCalled()
+    expect(r.redirect).toHaveBeenCalledWith(
+      'http://localhost:5173/configuracoes/seguranca?vinculo_erro=sessao&provedor=google'
+    )
   })
 })

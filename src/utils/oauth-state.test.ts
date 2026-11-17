@@ -62,4 +62,32 @@ describe('OAuth state storage', () => {
       acceptedTerms: false
     })
   })
+
+  it('stores who asked to link a provider, and reads it back', async () => {
+    const set = vi.fn().mockResolvedValue(undefined)
+    await saveOAuthState({ set }, 'abc', false, 'user-1')
+    expect(set).toHaveBeenCalledWith(
+      'oauth-state:abc',
+      { acceptedTerms: false, linkUserId: 'user-1' },
+      OAUTH_STATE_TTL_SECONDS
+    )
+
+    const get = vi
+      .fn()
+      .mockResolvedValue({ acceptedTerms: false, linkUserId: 'user-1' })
+    await expect(readOAuthState({ get }, 'abc')).resolves.toEqual({
+      acceptedTerms: false,
+      linkUserId: 'user-1'
+    })
+  })
+
+  it('ignores a link user that is not a string', async () => {
+    const get = vi
+      .fn()
+      .mockResolvedValue({ acceptedTerms: false, linkUserId: 42 })
+
+    await expect(readOAuthState({ get }, 'abc')).resolves.toEqual({
+      acceptedTerms: false
+    })
+  })
 })

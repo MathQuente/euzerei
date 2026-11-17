@@ -173,6 +173,8 @@ export class UserService {
         email: user.email,
         emailVerified: user.emailVerifiedAt !== null,
         hasPassword: user.hasPassword,
+        googleLinked: Boolean(user.googleId),
+        discordLinked: Boolean(user.discordId),
         pendingEmail,
         gamesAmount: user._count.userGames,
         totalHoursPlayed: totalHoursPlayed ? Number(totalHoursPlayed) : 0,

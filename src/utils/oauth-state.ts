@@ -7,14 +7,20 @@ export function parseAcceptedTerms(value: unknown): boolean {
   return value === 'true'
 }
 
+export interface OAuthState {
+  acceptedTerms: boolean
+  linkUserId?: string
+}
+
 export async function saveOAuthState(
   cache: Pick<CacheRepository, 'set'>,
   state: string,
-  acceptedTerms: boolean
+  acceptedTerms: boolean,
+  linkUserId?: string
 ) {
   await cache.set(
     oauthStateKey(state),
-    { acceptedTerms },
+    linkUserId ? { acceptedTerms, linkUserId } : { acceptedTerms },
     OAUTH_STATE_TTL_SECONDS
   )
 }
@@ -22,12 +28,13 @@ export async function saveOAuthState(
 export async function readOAuthState(
   cache: Pick<CacheRepository, 'get'>,
   state: string
-): Promise<{ acceptedTerms: boolean } | null> {
+): Promise<OAuthState | null> {
   const stored = await cache.get(oauthStateKey(state))
   if (stored === null || stored === undefined || stored === false) return null
 
-  const acceptedTerms =
-    typeof stored === 'object' &&
-    (stored as { acceptedTerms?: unknown }).acceptedTerms === true
-  return { acceptedTerms }
+  const fields = typeof stored === 'object' ? (stored as OAuthState) : null
+  const acceptedTerms = fields?.acceptedTerms === true
+  return typeof fields?.linkUserId === 'string'
+    ? { acceptedTerms, linkUserId: fields.linkUserId }
+    : { acceptedTerms }
 }

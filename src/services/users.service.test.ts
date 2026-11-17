@@ -1113,6 +1113,8 @@ describe('UserService.findMe', () => {
       userName: 'matheus',
       email: 'matheus@a.com',
       emailVerified: false,
+      googleLinked: false,
+      discordLinked: false,
       pendingEmail: null,
       gamesAmount: 3,
       totalHoursPlayed: 12.5,
@@ -1135,6 +1137,39 @@ describe('UserService.findMe', () => {
     expect(user.steamAccounts).toEqual([])
     expect(user.psnAccounts).toEqual([])
     expect(user.xboxAccounts).toEqual([])
+  })
+
+  it('tells which sign-in providers are linked without exposing their ids', async () => {
+    const userRepository = fakeUserRepository({
+      findUserById: vi.fn().mockResolvedValue({
+        id: 'user-1',
+        userName: 'matheus',
+        email: 'matheus@a.com',
+        emailVerifiedAt: null,
+        googleId: 'g-123',
+        discordId: null,
+        accounts: [],
+        _count: { userGames: 0 }
+      }),
+      sumUserHoursPlayed: vi.fn().mockResolvedValue(0)
+    })
+    const service = new UserService(
+      userRepository,
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository({
+        countFollowers: vi.fn().mockResolvedValue(0),
+        countFollowing: vi.fn().mockResolvedValue(0)
+      }),
+      undefined,
+      { get: vi.fn().mockResolvedValue(null) } as unknown as CacheRepository
+    )
+
+    const { user } = await service.findMe('user-1')
+
+    expect(user.googleLinked).toBe(true)
+    expect(user.discordLinked).toBe(false)
+    expect(JSON.stringify(user)).not.toContain('g-123')
   })
 
   it('shows the e-mail waiting for confirmation', async () => {

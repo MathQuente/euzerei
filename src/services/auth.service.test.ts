@@ -2436,3 +2436,365 @@ describe('AuthService e-mail change', () => {
     ).rejects.toMatchObject({ statusCode: 429 })
   })
 })
+
+describe('AuthService provider link', () => {
+  const tick = () => new Promise(resolve => setImmediate(resolve))
+
+  function build(
+    opts: {
+      hasPassword?: boolean
+      googleId?: string | null
+      discordId?: string | null
+      owner?: { id: string } | null
+      recent?: boolean
+    } = {}
+  ) {
+    const state = {
+      id: 'user-1',
+      email: 'dono@a.com',
+      hasPassword: opts.hasPassword ?? true,
+      googleId: opts.googleId ?? null,
+      discordId: opts.discordId ?? null
+    }
+    const cache = memoryCache()
+    const repo = {
+      findProviderState: vi.fn().mockResolvedValue(state),
+      findPasswordState: vi.fn().mockResolvedValue({
+        id: 'user-1',
+        email: 'dono@a.com',
+        password: bcrypt.hashSync('senha-certa', 4),
+        hasPassword: state.hasPassword
+      }),
+      findUserByGoogleId: vi.fn().mockResolvedValue(opts.owner ?? null),
+      findByDiscordId: vi.fn().mockResolvedValue(opts.owner ?? null),
+      attachProvider: vi.fn().mockResolvedValue(true),
+      detachProviderKeepingAMethod: vi.fn().mockResolvedValue(true),
+      deleteTokensByUserId: vi.fn().mockResolvedValue(undefined),
+      saveToken: vi.fn().mockResolvedValue(undefined)
+    }
+    const mail = {
+      sendProviderChangedNoticeEmail: vi.fn().mockResolvedValue(undefined)
+    }
+    const recent = {
+      isRecent: vi.fn().mockResolvedValue(opts.recent ?? true),
+      mark: vi.fn()
+    }
+    const service = new AuthService(
+      repo as unknown as AuthRepository,
+      fakeJwt(),
+      cache,
+      mail as unknown as EmailService,
+      recent as never
+    )
+    return { service, repo, mail, cache, recent }
+  }
+
+  beforeEach(() => {
+    vi.stubEnv('FRONTEND_URL', 'http://localhost:5173')
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+  })
+
+  it('asks for a recent sign-in before starting a link, and refuses a provider already linked', async () => {
+    const stale = build({ recent: false })
+    await expect(
+      stale.service.assertCanLinkProvider('user-1', 'google')
+    ).rejects.toBeInstanceOf(ReauthRequiredError)
+
+    const linked = build({ googleId: 'g-1' })
+    await expect(
+      linked.service.assertCanLinkProvider('user-1', 'google')
+    ).rejects.toMatchObject({ code: 'ja_ligado', statusCode: 409 })
+
+    const fine = build()
+    await expect(
+      fine.service.assertCanLinkProvider('user-1', 'discord')
+    ).resolves.toBeUndefined()
+  })
+
+  it('links only the provider id and warns the owner, leaving e-mail, photo and verification alone', async () => {
+    const { service, repo, mail } = build()
+
+    await service.linkProviderToUser('user-1', 'google', 'g-123', true)
+    await tick()
+
+    expect(repo.attachProvider).toHaveBeenCalledWith(
+      'user-1',
+      'google',
+      'g-123'
+    )
+    expect(mail.sendProviderChangedNoticeEmail).toHaveBeenCalledWith(
+      'dono@a.com',
+      'Google',
+      true,
+      'http://localhost:5173/configuracoes/seguranca'
+    )
+  })
+
+  it('links a Discord account the same way', async () => {
+    const { service, repo } = build()
+
+    await service.linkProviderToUser('user-1', 'discord', 'd-9', true)
+
+    expect(repo.attachProvider).toHaveBeenCalledWith('user-1', 'discord', 'd-9')
+  })
+
+  it('refuses a provider e-mail the provider did not verify', async () => {
+    const { service, repo } = build()
+
+    await expect(
+      service.linkProviderToUser('user-1', 'google', 'g-1', false)
+    ).rejects.toMatchObject({ code: 'email_nao_verificado' })
+    expect(repo.attachProvider).not.toHaveBeenCalled()
+  })
+
+  it('refuses an identity that belongs to another account, also when two requests race', async () => {
+    const taken = build({ owner: { id: 'other' } })
+    await expect(
+      taken.service.linkProviderToUser('user-1', 'google', 'g-1', true)
+    ).rejects.toMatchObject({
+      code: 'ja_ligado_outra_conta',
+      message: 'Este Google já está ligado a outra conta do EuZerei.'
+    })
+
+    const race = build()
+    race.repo.attachProvider.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('unique', {
+        code: 'P2002',
+        clientVersion: 'test'
+      })
+    )
+    await expect(
+      race.service.linkProviderToUser('user-1', 'google', 'g-1', true)
+    ).rejects.toMatchObject({ code: 'ja_ligado_outra_conta' })
+  })
+
+  it('refuses to link a provider the account already has', async () => {
+    const { service, repo } = build({ googleId: 'g-old' })
+
+    await expect(
+      service.linkProviderToUser('user-1', 'google', 'g-new', true)
+    ).rejects.toMatchObject({ code: 'ja_ligado' })
+    expect(repo.attachProvider).not.toHaveBeenCalled()
+  })
+
+  it('unlinks, warns the owner and drops a pending e-mail change', async () => {
+    const { service, repo, mail, cache } = build({
+      hasPassword: true,
+      googleId: 'g-1'
+    })
+    cache.store.set('email-change-current:user-1', {
+      tokenHash: 'h',
+      newEmail: 'x@a.com'
+    })
+    cache.store.set('email-change:h', { userId: 'user-1', newEmail: 'x@a.com' })
+
+    await service.unlinkProvider('user-1', 'google', 'senha-certa')
+    await tick()
+
+    expect(repo.detachProviderKeepingAMethod).toHaveBeenCalledWith(
+      'user-1',
+      'google'
+    )
+    expect(mail.sendProviderChangedNoticeEmail).toHaveBeenCalledWith(
+      'dono@a.com',
+      'Google',
+      false,
+      'http://localhost:5173/configuracoes/seguranca'
+    )
+    expect(cache.store.has('email-change-current:user-1')).toBe(false)
+    expect(cache.store.has('email-change:h')).toBe(false)
+  })
+
+  it('never removes the last way to sign in', async () => {
+    const onlyGoogle = build({ hasPassword: false, googleId: 'g-1' })
+    await expect(
+      onlyGoogle.service.unlinkProvider('user-1', 'google')
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: 'Defina uma senha antes de desvincular o Google.'
+    })
+    expect(onlyGoogle.repo.detachProviderKeepingAMethod).not.toHaveBeenCalled()
+  })
+
+  it('lets one provider go when another way to sign in remains', async () => {
+    const withDiscord = build({
+      hasPassword: false,
+      googleId: 'g-1',
+      discordId: 'd-1'
+    })
+    await withDiscord.service.unlinkProvider('user-1', 'google')
+    expect(withDiscord.repo.detachProviderKeepingAMethod).toHaveBeenCalledWith(
+      'user-1',
+      'google'
+    )
+
+    const withPassword = build({ hasPassword: true, discordId: 'd-1' })
+    await withPassword.service.unlinkProvider(
+      'user-1',
+      'discord',
+      'senha-certa'
+    )
+    expect(withPassword.repo.detachProviderKeepingAMethod).toHaveBeenCalledWith(
+      'user-1',
+      'discord'
+    )
+  })
+
+  it('asks for a recent sign-in to unlink, and refuses a provider that is not linked', async () => {
+    const stale = build({ googleId: 'g-1', recent: false })
+    await expect(
+      stale.service.unlinkProvider('user-1', 'google')
+    ).rejects.toBeInstanceOf(ReauthRequiredError)
+
+    const none = build({ hasPassword: true })
+    await expect(
+      none.service.unlinkProvider('user-1', 'discord')
+    ).rejects.toMatchObject({ statusCode: 404 })
+  })
+
+  it('two unlinks racing for the last two methods: the database refuses the one that would leave none', async () => {
+    const { service, repo } = build({
+      hasPassword: false,
+      googleId: 'g-1',
+      discordId: 'd-1'
+    })
+    repo.detachProviderKeepingAMethod.mockResolvedValue(false)
+
+    await expect(
+      service.unlinkProvider('user-1', 'discord')
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      message: 'Defina uma senha antes de desvincular o Discord.'
+    })
+  })
+
+  it('still unlinks when dropping the pending e-mail change fails', async () => {
+    const { service, repo, cache } = build({
+      hasPassword: true,
+      googleId: 'g-1'
+    })
+    ;(cache.del as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('redis down')
+    )
+
+    await expect(
+      service.unlinkProvider('user-1', 'google', 'senha-certa')
+    ).resolves.toEqual(
+      expect.objectContaining({ accessToken: expect.any(String) })
+    )
+    expect(repo.detachProviderKeepingAMethod).toHaveBeenCalled()
+  })
+
+  it('ends the other sessions after unlinking and keeps the person signed in', async () => {
+    const { service, repo, cache, recent } = build({
+      hasPassword: true,
+      googleId: 'g-1',
+      discordId: 'd-1'
+    })
+
+    const tokens = await service.unlinkProvider('user-1', 'google')
+
+    expect(repo.deleteTokensByUserId).toHaveBeenCalledWith('user-1')
+    expect(cache.store.has('sessions-revoked-at:user-1')).toBe(true)
+    expect(repo.saveToken).toHaveBeenCalled()
+    expect(recent.mark).toHaveBeenCalledWith('user-1')
+    expect(tokens).toEqual(
+      expect.objectContaining({
+        accessToken: expect.any(String),
+        refreshToken: expect.any(String)
+      })
+    )
+  })
+
+  it('does not touch the sessions when the provider was already gone', async () => {
+    const { service, repo } = build({
+      hasPassword: true,
+      googleId: 'g-1',
+      discordId: 'd-1'
+    })
+    repo.detachProviderKeepingAMethod.mockResolvedValue(false)
+    repo.findProviderState
+      .mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'dono@a.com',
+        hasPassword: true,
+        googleId: 'g-1',
+        discordId: 'd-1'
+      })
+      .mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'dono@a.com',
+        hasPassword: true,
+        googleId: null,
+        discordId: 'd-1'
+      })
+
+    await expect(service.unlinkProvider('user-1', 'google')).resolves.toBeNull()
+    expect(repo.deleteTokensByUserId).not.toHaveBeenCalled()
+  })
+
+  it('asks for the current password when it would be the only way left to sign in', async () => {
+    const { service, repo } = build({ hasPassword: true, googleId: 'g-1' })
+
+    await expect(
+      service.unlinkProvider('user-1', 'google')
+    ).rejects.toMatchObject({ message: 'Informe a senha atual.' })
+    await expect(
+      service.unlinkProvider('user-1', 'google', 'errada')
+    ).rejects.toMatchObject({ message: 'A senha atual está incorreta.' })
+    expect(repo.detachProviderKeepingAMethod).not.toHaveBeenCalled()
+  })
+
+  it('does not ask for the password when another provider remains', async () => {
+    const { service, repo } = build({
+      hasPassword: true,
+      googleId: 'g-1',
+      discordId: 'd-1'
+    })
+
+    await service.unlinkProvider('user-1', 'google')
+
+    expect(repo.findPasswordState).not.toHaveBeenCalled()
+    expect(repo.detachProviderKeepingAMethod).toHaveBeenCalled()
+  })
+
+  it('treats a second identical unlink as done instead of a missing password', async () => {
+    const { service, repo, mail } = build({
+      hasPassword: true,
+      googleId: 'g-1',
+      discordId: 'd-1'
+    })
+    repo.detachProviderKeepingAMethod.mockResolvedValue(false)
+    repo.findProviderState
+      .mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'dono@a.com',
+        hasPassword: true,
+        googleId: 'g-1',
+        discordId: 'd-1'
+      })
+      .mockResolvedValueOnce({
+        id: 'user-1',
+        email: 'dono@a.com',
+        hasPassword: true,
+        googleId: null,
+        discordId: 'd-1'
+      })
+
+    await expect(service.unlinkProvider('user-1', 'google')).resolves.toBeNull()
+    expect(mail.sendProviderChangedNoticeEmail).not.toHaveBeenCalled()
+  })
+
+  it('two links racing: the second one finds the provider already taken', async () => {
+    const { service, repo } = build()
+    repo.attachProvider.mockResolvedValue(false)
+
+    await expect(
+      service.linkProviderToUser('user-1', 'google', 'g-2', true)
+    ).rejects.toMatchObject({ code: 'ja_ligado' })
+  })
+})

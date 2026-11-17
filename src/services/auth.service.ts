@@ -4,6 +4,7 @@ import { CacheRepository } from '../repositories/cache.repository'
 import { EmailService } from './email.service'
 import { ClientError } from '../errors/client-error'
 import { ReauthRequiredError } from '../errors/reauth-required-error'
+import { ProviderLinkError } from '../errors/provider-link-error'
 import { TermsRequiredError } from '../errors/terms-required-error'
 import bcrypt from 'bcrypt'
 import { randomBytes } from 'node:crypto'
@@ -68,6 +69,11 @@ const emailChangeRequestsKey = (userId: string) =>
   `email-change-requests:${userId}`
 const passwordResetEpochKey = (userId: string) =>
   `password-reset-epoch:${userId}`
+export type OAuthProvider = 'google' | 'discord'
+const PROVIDER_LABEL: Record<OAuthProvider, 'Google' | 'Discord'> = {
+  google: 'Google',
+  discord: 'Discord'
+}
 const EMAIL_TAKEN_MESSAGE = 'Este e-mail já está em uso.'
 const INVALID_EMAIL_CHANGE_LINK_MESSAGE =
   'Link de confirmação inválido ou expirado.'
@@ -883,6 +889,168 @@ export class AuthService {
     )
 
     return { email: newEmail }
+  }
+
+  private providerIdOf(
+    user: { googleId: string | null; discordId: string | null },
+    provider: OAuthProvider
+  ) {
+    return provider === 'google' ? user.googleId : user.discordId
+  }
+
+  private async requireRecentSignIn(userId: string) {
+    if (!(await this.recentAuthService.isRecent(userId))) {
+      throw new ReauthRequiredError()
+    }
+  }
+
+  async assertCanLinkProvider(userId: string, provider: OAuthProvider) {
+    const user = await this.authRepository.findProviderState(userId)
+    if (!user) throw new ClientError('Conta não encontrada.', 404)
+    await this.requireRecentSignIn(userId)
+    if (this.providerIdOf(user, provider)) {
+      throw new ProviderLinkError(
+        'ja_ligado',
+        `O ${PROVIDER_LABEL[provider]} já está vinculado à sua conta.`
+      )
+    }
+  }
+
+  async linkProviderToUser(
+    userId: string,
+    provider: OAuthProvider,
+    providerId: string,
+    verifiedByProvider: boolean
+  ) {
+    const label = PROVIDER_LABEL[provider]
+    if (!verifiedByProvider) {
+      throw new ProviderLinkError(
+        'email_nao_verificado',
+        'O email dessa conta não foi verificado pelo provedor.'
+      )
+    }
+
+    const user = await this.authRepository.findProviderState(userId)
+    if (!user) throw new ClientError('Conta não encontrada.', 404)
+    if (this.providerIdOf(user, provider)) {
+      throw new ProviderLinkError(
+        'ja_ligado',
+        `O ${label} já está vinculado à sua conta.`
+      )
+    }
+
+    const owner =
+      provider === 'google'
+        ? await this.authRepository.findUserByGoogleId(providerId)
+        : await this.authRepository.findByDiscordId(providerId)
+    if (owner && owner.id !== userId) {
+      throw new ProviderLinkError(
+        'ja_ligado_outra_conta',
+        `Este ${label} já está ligado a outra conta do EuZerei.`
+      )
+    }
+
+    try {
+      const attached = await this.authRepository.attachProvider(
+        userId,
+        provider,
+        providerId
+      )
+      if (!attached) {
+        throw new ProviderLinkError(
+          'ja_ligado',
+          `O ${label} já está vinculado à sua conta.`
+        )
+      }
+    } catch (error) {
+      if (error instanceof ProviderLinkError) throw error
+      if (isUniqueViolation(error)) {
+        throw new ProviderLinkError(
+          'ja_ligado_outra_conta',
+          `Este ${label} já está ligado a outra conta do EuZerei.`
+        )
+      }
+      throw error
+    }
+
+    this.sendInBackground('ProviderLink', () =>
+      this.emailService.sendProviderChangedNoticeEmail(
+        user.email,
+        label,
+        true,
+        `${process.env.FRONTEND_URL}/configuracoes/seguranca`
+      )
+    )
+  }
+
+  async unlinkProvider(
+    userId: string,
+    provider: OAuthProvider,
+    currentPassword?: string
+  ) {
+    const label = PROVIDER_LABEL[provider]
+    const user = await this.authRepository.findProviderState(userId)
+    if (!user) throw new ClientError('Conta não encontrada.', 404)
+    await this.requireRecentSignIn(userId)
+
+    if (!this.providerIdOf(user, provider)) {
+      throw new ClientError(`O ${label} não está vinculado à sua conta.`, 404)
+    }
+
+    const methods =
+      (user.hasPassword ? 1 : 0) +
+      (user.googleId ? 1 : 0) +
+      (user.discordId ? 1 : 0)
+    if (methods <= 1) {
+      throw new ClientError(
+        `Defina uma senha antes de desvincular o ${label}.`,
+        409
+      )
+    }
+
+    const otherProviderId =
+      provider === 'google' ? user.discordId : user.googleId
+    if (user.hasPassword && !otherProviderId) {
+      const passwordState = await this.authRepository.findPasswordState(userId)
+      if (!passwordState) throw new ClientError('Conta não encontrada.', 404)
+      await this.assertCurrentCredentials(passwordState, currentPassword)
+      await this.cacheRepository
+        .del(passwordChangeFailuresKey(userId))
+        .catch(() => undefined)
+    }
+
+    const detached = await this.authRepository.detachProviderKeepingAMethod(
+      userId,
+      provider
+    )
+    if (!detached) {
+      const fresh = await this.authRepository.findProviderState(userId)
+      if (fresh && !this.providerIdOf(fresh, provider)) return null
+      throw new ClientError(
+        `Defina uma senha antes de desvincular o ${label}.`,
+        409
+      )
+    }
+    await this.authRepository.deleteTokensByUserId(userId)
+    await markSessionsRevoked(this.cacheRepository, userId)
+    try {
+      await this.cancelEmailChange(userId)
+    } catch (error) {
+      logError('[ProviderUnlink] pending e-mail change not cancelled:', error)
+    }
+
+    this.sendInBackground('ProviderUnlink', () =>
+      this.emailService.sendProviderChangedNoticeEmail(
+        user.email,
+        label,
+        false,
+        `${process.env.FRONTEND_URL}/configuracoes/seguranca`
+      )
+    )
+
+    const tokens = await this.generateTokens(userId)
+    await this.recentAuthService.mark(userId)
+    return tokens
   }
 
   async logout(refreshToken?: string, accessToken?: string) {

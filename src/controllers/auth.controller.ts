@@ -7,6 +7,9 @@ import { clearAuthCookies, setAuthCookies } from '../utils/auth-cookies'
 import { respondUnavailable } from '../utils/respond-unavailable'
 import { ReauthRequiredError } from '../errors/reauth-required-error'
 import { sendProblem } from '../utils/problem'
+import { ProviderLinkError } from '../errors/provider-link-error'
+import type { OAuthState } from '../utils/oauth-state'
+import type { OAuthProvider } from '../services/auth.service'
 
 export class AuthController {
   constructor(private authService: AuthService) {}
@@ -195,10 +198,65 @@ export class AuthController {
     clearAuthCookies(reply).send({ message: 'Sessão encerrada com sucesso.' })
   }
 
+  private sessionUserId(request: FastifyRequest) {
+    const user = request.user as { userId?: string } | undefined
+    return user?.userId ?? null
+  }
+
+  private providerErrorCode(error: unknown) {
+    if (error instanceof ProviderLinkError) return error.code
+    return 'falhou'
+  }
+
+  private redirectLinkFailure(
+    reply: FastifyReply,
+    error: unknown,
+    provider: OAuthProvider
+  ) {
+    console.error('Provider link OAuth error:', {
+      error: error instanceof Error ? error.message : 'unknown error'
+    })
+    return reply.redirect(
+      `${process.env.FRONTEND_URL}/configuracoes/seguranca?vinculo_erro=${this.providerErrorCode(error)}&provedor=${provider}`
+    )
+  }
+
+  private async finishProviderLink(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    provider: OAuthProvider,
+    linkUserId: string,
+    providerId: string,
+    verifiedByProvider: boolean
+  ) {
+    const back = `${process.env.FRONTEND_URL}/configuracoes/seguranca`
+    try {
+      if (this.sessionUserId(request) !== linkUserId) {
+        return reply.redirect(
+          `${back}?vinculo_erro=sessao&provedor=${provider}`
+        )
+      }
+      await this.authService.linkProviderToUser(
+        linkUserId,
+        provider,
+        providerId,
+        verifiedByProvider
+      )
+      return reply.redirect(`${back}?vinculado=${provider}`)
+    } catch (error) {
+      console.error(`${provider} link error:`, {
+        error: error instanceof Error ? error.message : 'unknown error'
+      })
+      return reply.redirect(
+        `${back}?vinculo_erro=${this.providerErrorCode(error)}&provedor=${provider}`
+      )
+    }
+  }
+
   async googleCallback(
     request: FastifyRequest,
     reply: FastifyReply,
-    acceptedTerms: boolean
+    state: OAuthState
   ) {
     try {
       const { code } = request.query as { code: string; state: string }
@@ -260,13 +318,27 @@ export class AuthController {
         picture: string
       }
 
+      if (state.linkUserId) {
+        return this.finishProviderLink(
+          request,
+          reply,
+          'google',
+          state.linkUserId,
+          profile.sub,
+          profile.email_verified === true
+        )
+      }
+
       const { accessToken, refreshToken } =
-        await this.authService.loginWithGoogle(profile, acceptedTerms)
+        await this.authService.loginWithGoogle(profile, state.acceptedTerms)
 
       setAuthCookies(reply, accessToken, refreshToken).redirect(
         process.env.FRONTEND_URL + '/'
       )
     } catch (error) {
+      if (state.linkUserId) {
+        return this.redirectLinkFailure(reply, error, 'google')
+      }
       this.redirectWithOAuthError(reply, 'Google', error)
     }
   }
@@ -274,7 +346,7 @@ export class AuthController {
   async discordCallback(
     request: FastifyRequest,
     reply: FastifyReply,
-    acceptedTerms: boolean
+    state: OAuthState
   ) {
     try {
       const { code } = request.query as { code: string }
@@ -331,13 +403,27 @@ export class AuthController {
         avatar: string
       }
 
+      if (state.linkUserId) {
+        return this.finishProviderLink(
+          request,
+          reply,
+          'discord',
+          state.linkUserId,
+          profile.id,
+          profile.verified === true
+        )
+      }
+
       const { accessToken, refreshToken } =
-        await this.authService.loginWithDiscord(profile, acceptedTerms)
+        await this.authService.loginWithDiscord(profile, state.acceptedTerms)
 
       setAuthCookies(reply, accessToken, refreshToken).redirect(
         process.env.FRONTEND_URL + '/'
       )
     } catch (error) {
+      if (state.linkUserId) {
+        return this.redirectLinkFailure(reply, error, 'discord')
+      }
       this.redirectWithOAuthError(reply, 'Discord', error)
     }
   }
