@@ -7,7 +7,11 @@ import {
   UserGameSortBy,
   UserGameSortOrder
 } from '../types/user'
-import { PLAYED_STATUS_ID, WISHLIST_STATUS_ID } from '../utils/library-status'
+import {
+  CLEAR_HUNDRED_PERCENT,
+  PLAYED_STATUS_ID,
+  WISHLIST_STATUS_ID
+} from '../utils/library-status'
 
 const NOT_WISHLIST = {
   UserGamesStatus: { status: { not: Status.WISHLIST } }
@@ -300,6 +304,7 @@ export class UserRepository {
       where: { userId_igdbId: { igdbId, userId } },
       select: {
         endless: true,
+        hundredPercent: true,
         UserGamesStatus: { select: { id: true, status: true } },
         UserGameStats: { select: { completions: true, hoursPlayed: true } },
         _count: { select: { platforms: true } }
@@ -315,6 +320,7 @@ export class UserRepository {
         igdbId: true,
         endless: true,
         endlessLocked: true,
+        hundredPercent: true,
         UserGamesStatus: { select: { id: true } },
         _count: { select: { platforms: true } }
       }
@@ -401,6 +407,7 @@ export class UserRepository {
         ug.igdb_id                    AS "igdbId",
         ugs.status                    AS "status",
         ug.endless                    AS "endless",
+        ug.hundred_percent            AS "hundredPercent",
         gc.name                       AS "name",
         gc.slug                       AS "slug",
         gc.cover_url                  AS "coverUrl",
@@ -441,7 +448,8 @@ export class UserRepository {
 
     return prisma.$queryRaw<PaginatedUserGameRow[]>(Prisma.sql`
       SELECT
-        ranked."igdbId", ranked."status", ranked."endless", ranked."name",
+        ranked."igdbId", ranked."status", ranked."endless", ranked."hundredPercent",
+        ranked."name",
         ranked."slug", ranked."coverUrl", ranked."platforms", ranked."releaseDate",
         ranked."rating", ranked."completions", ranked."hoursPlayed",
         ranked."playedOn"
@@ -496,6 +504,33 @@ export class UserRepository {
     })
   }
 
+  async setHundredPercent(igdbId: number, userId: string, value: boolean) {
+    const { count } = await prisma.userGame.updateMany({
+      where: {
+        userId,
+        igdbId,
+        ...(value ? { userGamesStatusId: PLAYED_STATUS_ID } : {})
+      },
+      data: { hundredPercent: value, hundredPercentLocked: true }
+    })
+    if (count === 0) return null
+    return { igdbId, hundredPercent: value }
+  }
+
+  async markHundredPercentFromImport(igdbId: number, userId: string) {
+    const { count } = await prisma.userGame.updateMany({
+      where: {
+        userId,
+        igdbId,
+        userGamesStatusId: PLAYED_STATUS_ID,
+        hundredPercent: false,
+        hundredPercentLocked: false
+      },
+      data: { hundredPercent: true }
+    })
+    return count === 1
+  }
+
   async removeGame(igdbId: number, userId: string) {
     return prisma.userGame.delete({
       where: { userId_igdbId: { igdbId, userId } },
@@ -541,6 +576,7 @@ export class UserRepository {
       data: {
         userGamesStatusId: statusId,
         endless: options.endless,
+        ...(statusId === PLAYED_STATUS_ID ? {} : CLEAR_HUNDRED_PERCENT),
         updatedAt: new Date(),
         completedAt: statusId === PLAYED_STATUS_ID ? new Date() : undefined
       },
@@ -576,6 +612,7 @@ export class UserRepository {
         data: {
           userGamesStatusId: statusId,
           completedAt: null,
+          ...CLEAR_HUNDRED_PERCENT,
           updatedAt: new Date()
         },
         select: {

@@ -113,6 +113,21 @@ export class UserController {
     return reply.status(200).send(result)
   }
 
+  async setHundredPercent(request: FastifyRequest, reply: FastifyReply) {
+    const { igdbId } = UserSchema.UserGameParamsSchema.parse(request.params)
+    const userId = request.user.userId
+    const { hundredPercent } =
+      UserSchema.UserGameHundredPercentBodySchema.parse(request.body)
+
+    const result = await this.userService.setHundredPercent(
+      igdbId,
+      userId,
+      hundredPercent
+    )
+
+    return reply.status(200).send(result)
+  }
+
   async setEndless(request: FastifyRequest, reply: FastifyReply) {
     const { igdbId } = UserSchema.UserGameParamsSchema.parse(request.params)
     const userId = request.user.userId

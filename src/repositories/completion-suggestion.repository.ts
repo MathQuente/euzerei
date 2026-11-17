@@ -1,6 +1,10 @@
 import { Platform, Prisma } from '../database/prisma-client'
 import { prisma } from '../database/db'
 import { isUniqueViolation } from '../utils/prisma-errors'
+import {
+  CLEAR_HUNDRED_PERCENT,
+  PLAYED_STATUS_ID
+} from '../utils/library-status'
 
 export const SUGGESTIBLE_STATUS_IDS = [2, 3, 4]
 
@@ -225,7 +229,8 @@ export class CompletionSuggestionRepository {
         where: { id: userGameId },
         data: {
           userGamesStatusId: before.statusId,
-          completedAt: before.completedAt ? new Date(before.completedAt) : null
+          completedAt: before.completedAt ? new Date(before.completedAt) : null,
+          ...(before.statusId === PLAYED_STATUS_ID ? {} : CLEAR_HUNDRED_PERCENT)
         }
       })
       await tx.userGameStats.updateMany({

@@ -73,6 +73,8 @@ Table user_games {
   completedAt DateTime
   endless Boolean [not null, default: false]
   endlessLocked Boolean [not null, default: false]
+  hundredPercent Boolean [not null, default: false]
+  hundredPercentLocked Boolean [not null, default: false]
   user users [not null]
   UserGameStats user_game_stats
   UserGamesStatus users_games_status [not null]

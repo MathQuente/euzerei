@@ -16,3 +16,8 @@ export const STATUS_NAME_BY_ID: Record<number, string> = {
   [WISHLIST_STATUS_ID]: 'WISHLIST',
   [DROPPED_STATUS_ID]: 'DROPPED'
 }
+
+export const CLEAR_HUNDRED_PERCENT = {
+  hundredPercent: false,
+  hundredPercentLocked: false
+} as const

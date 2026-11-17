@@ -29,6 +29,7 @@ function fakeUserRepository(
       .fn()
       .mockResolvedValue({ id: 'steam-acc-2', displayName: 'x' }),
     updateAccountName: vi.fn().mockResolvedValue(null),
+    markHundredPercentFromImport: vi.fn().mockResolvedValue(true),
     ...overrides
   } as unknown as UserRepository
 }
@@ -2241,5 +2242,72 @@ describe('SteamService.runImport with family shared games', () => {
     const { service } = build()
 
     await expect(service.runImport('user-1')).resolves.toBeDefined()
+  })
+
+  describe('SteamService.runImport 100% mark', () => {
+    beforeEach(() => {
+      vi.spyOn(SteamApiService, 'getWishlist').mockResolvedValue([])
+      vi.spyOn(IGDBService, 'getTimeToBeatByGameIds').mockResolvedValue(
+        new Map()
+      )
+      vi.spyOn(IGDBService, 'getGamesBySteamAppIds').mockResolvedValue([
+        { appId: 730, game: { id: 2, name: 'Game' } }
+      ] as never)
+      vi.spyOn(
+        SteamApiService,
+        'getGlobalAchievementPercentages'
+      ).mockResolvedValue(null)
+    })
+
+    async function run(achieved: number, total: number) {
+      const markHundredPercentFromImport = vi.fn().mockResolvedValue(true)
+      const userRepository = fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findUserGame: vi.fn().mockResolvedValue(null),
+        addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 2 }),
+        createUserGameStats: vi.fn().mockResolvedValue({ completions: 0 }),
+        upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 }),
+        markHundredPercentFromImport
+      })
+      vi.spyOn(SteamApiService, 'getOwnedGames').mockResolvedValue([
+        {
+          appid: 730,
+          name: 'Game',
+          playtime_forever: 600,
+          rtime_last_played: Math.floor(Date.now() / 1000)
+        }
+      ])
+      vi.spyOn(SteamApiService, 'getPlayerAchievements').mockResolvedValue({
+        achieved,
+        total,
+        achievedApiNames: [],
+        unlockTimesByName: new Map()
+      })
+      const service = new SteamService(
+        userRepository,
+        fakeGameCacheService(),
+        platformServiceFor(userRepository)
+      )
+      await service.runImport('user-1')
+      return markHundredPercentFromImport
+    }
+
+    it('asks for the 100% mark when every achievement is unlocked', async () => {
+      const mark = await run(20, 20)
+
+      expect(mark).toHaveBeenCalledWith(2, 'user-1')
+    })
+
+    it('does not ask for the mark when some achievements are still locked', async () => {
+      const mark = await run(18, 20)
+
+      expect(mark).not.toHaveBeenCalled()
+    })
+
+    it('does not ask for the mark on a game with too few achievements to tell', async () => {
+      const mark = await run(2, 2)
+
+      expect(mark).not.toHaveBeenCalled()
+    })
   })
 })

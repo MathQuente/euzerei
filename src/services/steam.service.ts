@@ -600,6 +600,7 @@ export class SteamService {
           hoursPlayed,
           finished: isFinished,
           confirmedFinished,
+          allAchievements: confirmedFinished,
           strongFinished: hasRareAchievement || hasCompletionKeyword,
           completedAt,
           endless: IGDBService.suggestsEndlessForGame(igdbGame)

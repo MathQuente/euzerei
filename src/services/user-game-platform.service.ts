@@ -34,6 +34,7 @@ export interface ImportedPlatformData {
   hoursPlayed?: number
   finished: boolean
   confirmedFinished: boolean
+  allAchievements?: boolean
   strongFinished?: boolean
   completedAt?: Date
   endless?: boolean
@@ -457,6 +458,10 @@ export class UserGamePlatformService {
         values,
         ...accountHours
       )
+    }
+
+    if (data.allAchievements) {
+      await this.userRepository.markHundredPercentFromImport(igdbId, userId)
     }
 
     return isNew ? 'imported' : 'updated'

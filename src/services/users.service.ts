@@ -235,6 +235,7 @@ export class UserService {
     return {
       userGameStatus: userGameStatus?.UserGamesStatus || null,
       endless: userGameStatus?.endless ?? false,
+      hundredPercent: userGameStatus?.hundredPercent ?? false,
       hoursPlayed: Number(userGameStatus?.UserGameStats?.hoursPlayed ?? 0),
       completions: userGameStatus?.UserGameStats?.completions ?? 0
     }
@@ -255,6 +256,39 @@ export class UserService {
       }
       throw error
     }
+  }
+
+  async setHundredPercent(igdbId: number, userId: string, value: boolean) {
+    await this.requireUser(userId)
+
+    const userGame = await this.userRepository.findUserGameStatus(
+      igdbId,
+      userId
+    )
+    if (!userGame)
+      throw new ClientError('Jogo não encontrado na sua biblioteca.', 404)
+
+    if (value && userGame.UserGamesStatus?.id !== PLAYED_STATUS_ID) {
+      throw new ClientError(
+        'Só um jogo marcado como Jogado pode ser concluído a 100%.',
+        409
+      )
+    }
+
+    const result = await this.userRepository.setHundredPercent(
+      igdbId,
+      userId,
+      value
+    )
+    if (!result) {
+      throw new ClientError(
+        value
+          ? 'Só um jogo marcado como Jogado pode ser concluído a 100%.'
+          : 'Jogo não encontrado na sua biblioteca.',
+        value ? 409 : 404
+      )
+    }
+    return result
   }
 
   async findManyUsers(pageIndex: number, query: string | undefined) {
@@ -414,7 +448,8 @@ export class UserService {
             hoursPlayed: r.hoursPlayed,
             playedOn: r.playedOn ?? [],
             status: r.status as string,
-            endless: r.endless
+            endless: r.endless,
+            hundredPercent: r.hundredPercent
           }
         }
 
@@ -433,7 +468,8 @@ export class UserService {
           hoursPlayed: r.hoursPlayed,
           playedOn: r.playedOn ?? [],
           status: r.status as string,
-          endless: r.endless
+          endless: r.endless,
+          hundredPercent: r.hundredPercent
         }
       })
       .filter((g): g is NonNullable<typeof g> => g !== null)

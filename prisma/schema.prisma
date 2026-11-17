@@ -88,6 +88,8 @@ model UserGame {
   completedAt       DateTime? @map("completed_at")
   endless           Boolean   @default(false)
   endlessLocked     Boolean   @default(false) @map("endless_locked")
+  hundredPercent    Boolean   @default(false) @map("hundred_percent")
+  hundredPercentLocked Boolean @default(false) @map("hundred_percent_locked")
   user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   UserGameStats   UserGameStats?

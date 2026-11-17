@@ -285,6 +285,24 @@ export async function userRoutes(app: FastifyInstance) {
     async (request, reply) => userController.setEndless(request, reply)
   )
 
+  app.withTypeProvider<ZodTypeProvider>().put(
+    '/hundred-percent/:igdbId',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        params: UserSchema.UserGameParamsSchema,
+        body: UserSchema.UserGameHundredPercentBodySchema,
+        response: {
+          200: UserSchema.UpdateUserGameHundredPercentResponseSchema,
+          404: ErrorSchemas.NotFound,
+          409: ErrorSchemas.BadRequest,
+          500: ErrorSchemas.InternalServerError
+        }
+      }
+    },
+    async (request, reply) => userController.setHundredPercent(request, reply)
+  )
+
   app.withTypeProvider<ZodTypeProvider>().get(
     '/userGames',
     {

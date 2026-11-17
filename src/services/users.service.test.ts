@@ -155,6 +155,7 @@ describe('UserService.findUserGameStatus', () => {
     await expect(service.findUserGameStatus(7, 'user-1')).resolves.toEqual({
       userGameStatus: { id: 4, status: 'BACKLOG' },
       endless: true,
+      hundredPercent: false,
       hoursPlayed: 108.5,
       completions: 4
     })
@@ -165,6 +166,7 @@ describe('UserService.findUserGameStatus', () => {
       'without stats',
       {
         endless: false,
+        hundredPercent: false,
         UserGamesStatus: { id: 3, status: 'PLAYING' },
         UserGameStats: null
       }
@@ -173,6 +175,7 @@ describe('UserService.findUserGameStatus', () => {
       'with null hours',
       {
         endless: false,
+        hundredPercent: false,
         UserGamesStatus: { id: 3, status: 'PLAYING' },
         UserGameStats: { hoursPlayed: null, completions: 0 }
       }
@@ -194,6 +197,7 @@ describe('UserService.findUserGameStatus', () => {
     await expect(service.findUserGameStatus(7, 'user-1')).resolves.toEqual({
       userGameStatus: null,
       endless: false,
+      hundredPercent: false,
       hoursPlayed: 0,
       completions: 0
     })
@@ -503,7 +507,8 @@ describe('UserService.findManyUserGames', () => {
         completions: 0,
         hoursPlayed: 0,
         playedOn: [],
-        endless: false
+        endless: false,
+        hundredPercent: false
       },
       {
         igdbId: 2,
@@ -517,7 +522,8 @@ describe('UserService.findManyUserGames', () => {
         completions: 0,
         hoursPlayed: 0,
         playedOn: [],
-        endless: false
+        endless: false,
+        hundredPercent: false
       }
     ]
     const userRepository = fakeUserRepository({
@@ -562,7 +568,8 @@ describe('UserService.findManyUserGames', () => {
         completions: 0,
         hoursPlayed: 0,
         playedOn: [],
-        endless: false
+        endless: false,
+        hundredPercent: false
       },
       {
         igdbId: 99,
@@ -576,7 +583,8 @@ describe('UserService.findManyUserGames', () => {
         completions: 0,
         hoursPlayed: 0,
         playedOn: [],
-        endless: false
+        endless: false,
+        hundredPercent: false
       }
     ]
     const userRepository = fakeUserRepository({
@@ -637,7 +645,8 @@ describe('UserService.findManyUserGames', () => {
         completions: 0,
         hoursPlayed: 0,
         playedOn: [],
-        endless: false
+        endless: false,
+        hundredPercent: false
       }
     ]
     const userRepository = fakeUserRepository({
@@ -774,7 +783,8 @@ describe('UserService.findManyUserGames overview', () => {
           completions: 0,
           hoursPlayed: 0,
           playedOn: [],
-          endless: false
+          endless: false,
+          hundredPercent: false
         }
       ])
     })
@@ -1654,6 +1664,84 @@ describe('UserService.updateUserGamePlayedCount', () => {
       service.updateUserGamePlayedCount('user-1', 1, 1)
     ).resolves.toEqual({
       playedCount: 3
+    })
+  })
+
+  describe('UserService.setHundredPercent', () => {
+    function build(
+      statusId: number | null,
+      update = vi.fn().mockResolvedValue({ igdbId: 7, hundredPercent: true })
+    ) {
+      const userRepository = fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findUserGameStatus: vi
+          .fn()
+          .mockResolvedValue(
+            statusId === null
+              ? null
+              : { UserGamesStatus: { id: statusId, status: 'X' } }
+          ),
+        setHundredPercent: update
+      })
+      const service = new UserService(
+        userRepository,
+        fakeRatingRepository(),
+        fakeGameCacheService(),
+        fakeFollowRepository()
+      )
+      return { service, update }
+    }
+
+    it('marks a played game and locks the mark', async () => {
+      const { service, update } = build(1)
+
+      await expect(
+        service.setHundredPercent(7, 'user-1', true)
+      ).resolves.toEqual({
+        igdbId: 7,
+        hundredPercent: true
+      })
+      expect(update).toHaveBeenCalledWith(7, 'user-1', true)
+    })
+
+    it('refuses the mark on a game that is not played', async () => {
+      const { service, update } = build(3)
+
+      await expect(
+        service.setHundredPercent(7, 'user-1', true)
+      ).rejects.toMatchObject({ statusCode: 409 })
+      expect(update).not.toHaveBeenCalled()
+    })
+
+    it('lets the mark be removed from a game in any status', async () => {
+      const { service, update } = build(
+        3,
+        vi.fn().mockResolvedValue({ igdbId: 7, hundredPercent: false })
+      )
+
+      await expect(
+        service.setHundredPercent(7, 'user-1', false)
+      ).resolves.toEqual({
+        igdbId: 7,
+        hundredPercent: false
+      })
+      expect(update).toHaveBeenCalledWith(7, 'user-1', false)
+    })
+
+    it('answers 409 when the game stopped being played before the write', async () => {
+      const { service } = build(1, vi.fn().mockResolvedValue(null))
+
+      await expect(
+        service.setHundredPercent(7, 'user-1', true)
+      ).rejects.toMatchObject({ statusCode: 409 })
+    })
+
+    it('answers 404 for a game that is not in the library', async () => {
+      const { service } = build(null)
+
+      await expect(
+        service.setHundredPercent(7, 'user-1', true)
+      ).rejects.toMatchObject({ statusCode: 404 })
     })
   })
 })

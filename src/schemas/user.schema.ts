@@ -104,6 +104,15 @@ export const UpdateUserGameEndlessResponseSchema = z.object({
   endless: z.boolean()
 })
 
+export const UserGameHundredPercentBodySchema = z.object({
+  hundredPercent: z.boolean()
+})
+
+export const UpdateUserGameHundredPercentResponseSchema = z.object({
+  igdbId: z.number(),
+  hundredPercent: z.boolean()
+})
+
 export const UserGamePlayedCountUpdateBodySchema = z.object({
   incrementValue: z.number().int().min(-1).max(1)
 })
@@ -144,6 +153,7 @@ export const GetUserGameStatusResponse = z.object({
     })
     .nullable(),
   endless: z.boolean(),
+  hundredPercent: z.boolean(),
   hoursPlayed: z.number(),
   completions: z.number()
 })
@@ -160,7 +170,8 @@ const UserGameEntrySchema = z.object({
   hoursPlayed: z.number(),
   playedOn: z.array(z.string()),
   status: z.string(),
-  endless: z.boolean()
+  endless: z.boolean(),
+  hundredPercent: z.boolean()
 })
 
 export const GetAllUserGamesResponseSchema = z.object({
