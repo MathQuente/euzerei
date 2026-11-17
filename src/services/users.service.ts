@@ -170,13 +170,19 @@ export class UserService {
   async findMe(userId: string) {
     const user = await this.requireUser(userId)
 
-    const totalHoursPlayed =
-      await this.userRepository.sumUserHoursPlayed(userId)
-    const hundredPercentCount =
-      await this.userRepository.countHundredPercent(userId)
-    const followersCount = await this.followRepository.countFollowers(userId)
-    const followingCount = await this.followRepository.countFollowing(userId)
-    const pendingEmail = await this.readPendingEmail(userId)
+    const [
+      totalHoursPlayed,
+      hundredPercentCount,
+      followersCount,
+      followingCount,
+      pendingEmail
+    ] = await Promise.all([
+      this.userRepository.sumUserHoursPlayed(userId),
+      this.userRepository.countHundredPercent(userId),
+      this.followRepository.countFollowers(userId),
+      this.followRepository.countFollowing(userId),
+      this.readPendingEmail(userId)
+    ])
 
     return {
       user: {
@@ -220,13 +226,17 @@ export class UserService {
   async findById(userId: string) {
     const user = await this.requireUser(userId)
 
-    const gamesAmount = await this.userRepository.countUserGames(userId)
-    const totalHoursPlayed =
-      await this.userRepository.sumUserHoursPlayed(userId)
-    const hundredPercentCount =
-      await this.userRepository.countHundredPercent(userId)
-    const followersCount = await this.followRepository.countFollowers(userId)
-    const followingCount = await this.followRepository.countFollowing(userId)
+    const [
+      totalHoursPlayed,
+      hundredPercentCount,
+      followersCount,
+      followingCount
+    ] = await Promise.all([
+      this.userRepository.sumUserHoursPlayed(userId),
+      this.userRepository.countHundredPercent(userId),
+      this.followRepository.countFollowers(userId),
+      this.followRepository.countFollowing(userId)
+    ])
 
     return {
       user: {
@@ -234,7 +244,8 @@ export class UserService {
         profilePicture: user.profilePicture,
         userBanner: user.userBanner,
         userName: user.userName,
-        gamesAmount: gamesAmount?._count.userGames,
+        // findUserById já conta fora da lista de desejos (NOT_WISHLIST).
+        gamesAmount: user._count.userGames,
         totalHoursPlayed: totalHoursPlayed ? Number(totalHoursPlayed) : 0,
         hundredPercentCount,
         createdAt: user.createdAt.toISOString(),

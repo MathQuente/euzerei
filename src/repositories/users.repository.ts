@@ -184,13 +184,6 @@ export class UserRepository {
     return result._sum.hoursPlayed
   }
 
-  async countUserGames(userId: string) {
-    return prisma.user.findUnique({
-      where: { id: userId },
-      select: { _count: { select: { userGames: { where: NOT_WISHLIST } } } }
-    })
-  }
-
   async countHundredPercent(userId: string) {
     return prisma.userGame.count({
       where: { userId, hundredPercent: true, ...NOT_WISHLIST }

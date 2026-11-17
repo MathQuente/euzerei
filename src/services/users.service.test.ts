@@ -1201,7 +1201,6 @@ describe('UserService.findById', () => {
         ],
         _count: { userGames: 3 }
       }),
-      countUserGames: vi.fn().mockResolvedValue({ _count: { userGames: 3 } }),
       countHundredPercent: vi.fn().mockResolvedValue(6),
       sumUserHoursPlayed: vi.fn().mockResolvedValue(12.5)
     })
