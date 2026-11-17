@@ -1,4 +1,4 @@
-import { Status } from '../database/prisma-client'
+import { Platform, Status } from '../database/prisma-client'
 import { UpdateUserDTO } from '../dtos/user.dto'
 import { ClientError } from '../errors/client-error'
 import { isRecordNotFound, isUniqueViolation } from '../utils/prisma-errors'
@@ -156,11 +156,24 @@ export class UserService {
     }
   }
 
+  private storeNames(accounts: { platform: Platform; displayName: string }[]) {
+    const namesOf = (platform: Platform) =>
+      accounts.filter(a => a.platform === platform).map(a => a.displayName)
+
+    return {
+      steam: namesOf(Platform.STEAM),
+      playstation: namesOf(Platform.PLAYSTATION),
+      xbox: namesOf(Platform.XBOX)
+    }
+  }
+
   async findMe(userId: string) {
     const user = await this.requireUser(userId)
 
     const totalHoursPlayed =
       await this.userRepository.sumUserHoursPlayed(userId)
+    const hundredPercentCount =
+      await this.userRepository.countHundredPercent(userId)
     const followersCount = await this.followRepository.countFollowers(userId)
     const followingCount = await this.followRepository.countFollowing(userId)
     const pendingEmail = await this.readPendingEmail(userId)
@@ -179,6 +192,8 @@ export class UserService {
         pendingEmail,
         gamesAmount: user._count.userGames,
         totalHoursPlayed: totalHoursPlayed ? Number(totalHoursPlayed) : 0,
+        hundredPercentCount,
+        createdAt: user.createdAt.toISOString(),
         steamAccounts: user.accounts
           .filter(account => account.platform === 'STEAM')
           .map(account => ({
@@ -208,6 +223,8 @@ export class UserService {
     const gamesAmount = await this.userRepository.countUserGames(userId)
     const totalHoursPlayed =
       await this.userRepository.sumUserHoursPlayed(userId)
+    const hundredPercentCount =
+      await this.userRepository.countHundredPercent(userId)
     const followersCount = await this.followRepository.countFollowers(userId)
     const followingCount = await this.followRepository.countFollowing(userId)
 
@@ -219,6 +236,9 @@ export class UserService {
         userName: user.userName,
         gamesAmount: gamesAmount?._count.userGames,
         totalHoursPlayed: totalHoursPlayed ? Number(totalHoursPlayed) : 0,
+        hundredPercentCount,
+        createdAt: user.createdAt.toISOString(),
+        stores: this.storeNames(user.accounts),
         followersCount,
         followingCount
       }

@@ -1162,7 +1162,7 @@ describe('UserService.updateGame', () => {
 })
 
 describe('UserService.findById', () => {
-  it('returns the full profile, without linked accounts, including follow counts', async () => {
+  it('returns the public profile with store names only (no ids), the join date and the 100% count', async () => {
     const userRepository = fakeUserRepository({
       findUserById: vi.fn().mockResolvedValue({
         id: 'user-1',
@@ -1171,9 +1171,38 @@ describe('UserService.findById', () => {
         userBanner: 'banner.png',
         steamId: '12345',
         psnOnlineId: 'psn-user',
+        createdAt: new Date('2026-08-05T12:00:00.000Z'),
+        accounts: [
+          {
+            id: 'x-1',
+            platform: 'XBOX',
+            externalId: 'xuid-1',
+            displayName: 'Gamer',
+            preferredConsole: 'XBOX_SERIES'
+          },
+          {
+            id: 's-1',
+            platform: 'STEAM',
+            externalId: '76561197960287930',
+            displayName: 'MathQuente'
+          },
+          {
+            id: 's-2',
+            platform: 'STEAM',
+            externalId: '76561197960287931',
+            displayName: 'Alt'
+          },
+          {
+            id: 'p-1',
+            platform: 'PLAYSTATION',
+            externalId: 'psn-secret',
+            displayName: 'Player_1'
+          }
+        ],
         _count: { userGames: 3 }
       }),
       countUserGames: vi.fn().mockResolvedValue({ _count: { userGames: 3 } }),
+      countHundredPercent: vi.fn().mockResolvedValue(6),
       sumUserHoursPlayed: vi.fn().mockResolvedValue(12.5)
     })
     const followRepository = fakeFollowRepository({
@@ -1196,9 +1225,19 @@ describe('UserService.findById', () => {
       userName: 'matheus',
       gamesAmount: 3,
       totalHoursPlayed: 12.5,
+      hundredPercentCount: 6,
+      createdAt: '2026-08-05T12:00:00.000Z',
+      stores: {
+        steam: ['MathQuente', 'Alt'],
+        playstation: ['Player_1'],
+        xbox: ['Gamer']
+      },
       followersCount: 2,
       followingCount: 5
     })
+    expect(JSON.stringify(user)).not.toContain('xuid-1')
+    expect(JSON.stringify(user)).not.toContain('psn-secret')
+    expect(JSON.stringify(user)).not.toContain('76561197960287930')
     expect(user).not.toHaveProperty('steamId')
     expect(user).not.toHaveProperty('psnOnlineId')
   })
@@ -1219,9 +1258,11 @@ describe('UserService.findMe', () => {
         emailVerifiedAt: null,
         profilePicture: 'pic.png',
         userBanner: 'banner.png',
+        createdAt: new Date('2026-08-05T12:00:00.000Z'),
         accounts,
         _count: { userGames: 3 }
       }),
+      countHundredPercent: vi.fn().mockResolvedValue(6),
       sumUserHoursPlayed: vi.fn().mockResolvedValue(12.5)
     })
     const followRepository = fakeFollowRepository({
@@ -1281,6 +1322,8 @@ describe('UserService.findMe', () => {
       pendingEmail: null,
       gamesAmount: 3,
       totalHoursPlayed: 12.5,
+      hundredPercentCount: 6,
+      createdAt: '2026-08-05T12:00:00.000Z',
       steamAccounts: [
         { id: 's-1', steamId: '76561197960287930', personaName: 'MathQuente' },
         { id: 's-2', steamId: '76561197960287931', personaName: 'Alt' }
@@ -1311,9 +1354,11 @@ describe('UserService.findMe', () => {
         emailVerifiedAt: null,
         googleId: 'g-123',
         discordId: null,
+        createdAt: new Date('2026-08-05T12:00:00.000Z'),
         accounts: [],
         _count: { userGames: 0 }
       }),
+      countHundredPercent: vi.fn().mockResolvedValue(0),
       sumUserHoursPlayed: vi.fn().mockResolvedValue(0)
     })
     const service = new UserService(

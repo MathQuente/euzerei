@@ -191,6 +191,12 @@ export class UserRepository {
     })
   }
 
+  async countHundredPercent(userId: string) {
+    return prisma.userGame.count({
+      where: { userId, hundredPercent: true, ...NOT_WISHLIST }
+    })
+  }
+
   async deleteUser(userId: string) {
     return prisma.user.delete({
       where: { id: userId },
@@ -226,6 +232,7 @@ export class UserRepository {
         userBanner: true,
         userName: true,
         profilePicture: true,
+        createdAt: true,
         accounts: {
           select: {
             id: true,

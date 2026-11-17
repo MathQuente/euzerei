@@ -21,6 +21,13 @@ export const GetUserResponseSchema = z.object({
     userBanner: z.string().nullable(),
     gamesAmount: z.number(),
     totalHoursPlayed: z.number(),
+    hundredPercentCount: z.number(),
+    createdAt: z.string(),
+    stores: z.object({
+      steam: z.array(z.string()),
+      playstation: z.array(z.string()),
+      xbox: z.array(z.string())
+    }),
     followersCount: z.number(),
     followingCount: z.number()
   })
@@ -40,6 +47,8 @@ export const GetMeResponseSchema = z.object({
     pendingEmail: z.string().nullable(),
     gamesAmount: z.number(),
     totalHoursPlayed: z.number(),
+    hundredPercentCount: z.number(),
+    createdAt: z.string(),
     steamAccounts: z.array(
       z.object({ id: z.string(), steamId: z.string(), personaName: z.string() })
     ),
