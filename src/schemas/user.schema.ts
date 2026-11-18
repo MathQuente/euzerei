@@ -437,3 +437,14 @@ export const GetRouletteResponseSchema = z.object({
   total: z.number(),
   games: z.array(UserGameEntrySchema)
 })
+
+export const ImageUploadSignatureResponseSchema = z.object({
+  cloudName: z.string(),
+  apiKey: z.string(),
+  timestamp: z.number().int(),
+  folder: z.string(),
+  publicId: z.string(),
+  allowedFormats: z.string(),
+  uploadPreset: z.string(),
+  signature: z.string()
+})

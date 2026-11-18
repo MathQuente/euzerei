@@ -4,6 +4,7 @@ import * as UserSchema from '../schemas/user.schema'
 import { ClientError } from '../errors/client-error'
 import { CacheRepository } from '../repositories/cache.repository'
 import { clearAuthCookies } from '../utils/auth-cookies'
+import { CloudinaryService } from '../services/cloudinary.service'
 
 const IDEMPOTENCY_TTL_SECONDS = 60
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{8,64}$/
@@ -27,6 +28,13 @@ export class UserController {
     )
 
     return reply.status(201).send({ igdbId: addedId })
+  }
+
+  async createImageUploadSignature(
+    _request: FastifyRequest,
+    reply: FastifyReply
+  ) {
+    return reply.status(200).send(CloudinaryService.createUploadSignature())
   }
 
   async deleteUser(request: FastifyRequest, reply: FastifyReply) {

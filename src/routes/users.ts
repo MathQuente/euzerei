@@ -15,6 +15,7 @@ import { RecentAuthService } from '../services/recent-auth.service'
 import { UserGamePlatformRepository } from '../repositories/user-game-platform.repository'
 import { UserGamePlatformService } from '../services/user-game-platform.service'
 import { sendProblem } from '../utils/problem'
+import { userRateLimit } from '../utils/user-rate-limit'
 import { UserGamePlatformController } from '../controllers/user-game-platform.controller'
 
 export async function userRoutes(app: FastifyInstance) {
@@ -57,6 +58,23 @@ export async function userRoutes(app: FastifyInstance) {
     404: ErrorSchemas.NotFound,
     500: ErrorSchemas.InternalServerError
   }
+
+  app.withTypeProvider<ZodTypeProvider>().post(
+    '/image-upload-signature',
+    {
+      preHandler: [app.authenticate],
+      config: { rateLimit: userRateLimit('image-upload', 10) },
+      schema: {
+        response: {
+          200: UserSchema.ImageUploadSignatureResponseSchema,
+          503: ErrorSchemas.InternalServerError,
+          500: ErrorSchemas.InternalServerError
+        }
+      }
+    },
+    async (request, reply) =>
+      userController.createImageUploadSignature(request, reply)
+  )
 
   app.withTypeProvider<ZodTypeProvider>().get(
     '/platforms/:igdbId',
