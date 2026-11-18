@@ -16,6 +16,14 @@ const TRENDING_WINDOW_DAYS = 30
 const GAME_CACHE_TTL_SECONDS = 60 * 60
 const RECENT_FEATURED_LIMIT = 9
 
+// The released/coming-soon split changes at midnight in Brazil. The day of the
+// cutoff goes into the cache key so a list cached before the turn of the day
+// is not served after it; the same cutoff is passed to the query, so key and
+// result never disagree.
+function releaseCutoffDay(cutoff: number) {
+  return new Date(cutoff * 1000).toISOString().slice(0, 10)
+}
+
 export class GameService {
   constructor(
     private ratingRepository: RatingRepository,
@@ -279,14 +287,15 @@ export class GameService {
   }
 
   private async findRecentlyReleasedGames(limit = 6) {
-    const key = `games:recent:${limit}`
+    const cutoff = IGDBService.getReleaseCutoffEpoch()
+    const key = `games:recent:${releaseCutoffDay(cutoff)}:${limit}`
     let games: IGDBGame[]
     const cached = await this.cacheRepository.get(key)
 
     if (cached !== null) {
       games = (cached as { games: IGDBGame[] }).games
     } else {
-      games = await IGDBService.getRecentlyReleasedGames(limit)
+      games = await IGDBService.getRecentlyReleasedGames(limit, cutoff)
       await this.cacheRepository.set(key, { games }, GAME_CACHE_TTL_SECONDS)
     }
 
@@ -294,7 +303,8 @@ export class GameService {
   }
 
   async findComingSoonGames(limit = 20, pageIndex = 0, userId?: string) {
-    const key = `games:comingSoon:${limit}:${pageIndex}`
+    const cutoff = IGDBService.getReleaseCutoffEpoch()
+    const key = `games:comingSoon:${releaseCutoffDay(cutoff)}:${limit}:${pageIndex}`
     let games: IGDBGame[]
     let total: number
     const cached = await this.cacheRepository.get(key)
@@ -304,7 +314,11 @@ export class GameService {
       games = parsed.games
       total = parsed.total
     } else {
-      const results = await IGDBService.getComingSoonGames(limit, pageIndex)
+      const results = await IGDBService.getComingSoonGames(
+        limit,
+        pageIndex,
+        cutoff
+      )
 
       games = results.games
       total = results.total

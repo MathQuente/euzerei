@@ -283,3 +283,62 @@ describe('GameService.findGameById release precision', () => {
     expect(game.releaseDatePrecision).toBeUndefined()
   })
 })
+
+describe('GameService home lists cache', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function lists() {
+    const comingSoon = vi
+      .spyOn(IGDBService, 'getComingSoonGames')
+      .mockResolvedValue({ games: [], total: 0 })
+    const recent = vi
+      .spyOn(IGDBService, 'getRecentlyReleasedGames')
+      .mockResolvedValue([])
+    return { comingSoon, recent }
+  }
+
+  it('keys both lists by the day of the cutoff and queries with that same cutoff', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-18T15:00:00Z'))
+    const { service, cacheRepository } = setup()
+    const { comingSoon, recent } = lists()
+
+    await service.findComingSoonGames(6, 0)
+    await (
+      service as unknown as {
+        findRecentlyReleasedGames: (limit: number) => Promise<unknown>
+      }
+    ).findRecentlyReleasedGames(6)
+
+    const keys = cacheRepository.set.mock.calls.map(call => call[0])
+    expect(keys).toContain('games:comingSoon:2026-11-19:6:0')
+    expect(keys.some(key => key.startsWith('games:recent:2026-11-19:'))).toBe(
+      true
+    )
+    const cutoff = Date.UTC(2026, 10, 19) / 1000
+    expect(comingSoon).toHaveBeenCalledWith(6, 0, cutoff)
+    expect(recent).toHaveBeenCalledWith(expect.any(Number), cutoff)
+  })
+
+  it('changes the key when the day turns in Brazil (03:00 UTC)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const { service, cacheRepository } = setup()
+    const { comingSoon } = lists()
+
+    vi.setSystemTime(new Date('2026-11-19T02:59:00Z'))
+    await service.findComingSoonGames(6, 0)
+    vi.setSystemTime(new Date('2026-11-19T03:00:00Z'))
+    await service.findComingSoonGames(6, 0)
+
+    expect(cacheRepository.set.mock.calls.map(call => call[0])).toEqual([
+      'games:comingSoon:2026-11-19:6:0',
+      'games:comingSoon:2026-11-20:6:0'
+    ])
+    expect(comingSoon.mock.calls.map(call => call[2])).toEqual([
+      Date.UTC(2026, 10, 19) / 1000,
+      Date.UTC(2026, 10, 20) / 1000
+    ])
+  })
+})

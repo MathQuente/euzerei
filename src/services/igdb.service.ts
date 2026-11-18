@@ -325,8 +325,10 @@ export class IGDBService {
     return results.map(({ uid, game }) => ({ appId: Number(uid), game }))
   }
 
-  static async getRecentlyReleasedGames(limit = 6): Promise<IGDBGame[]> {
-    const cutoff = this.getReleaseCutoffEpoch()
+  static async getRecentlyReleasedGames(
+    limit = 6,
+    cutoff = this.getReleaseCutoffEpoch()
+  ): Promise<IGDBGame[]> {
     return this.request<IGDBGame[]>(
       'games',
       `fields id,name,cover.url,rating,platforms.name,first_release_date,category,game_type,parent_game; where first_release_date < ${cutoff} & first_release_date != null & cover != null & ${EXCLUDE_EROTIC} & total_rating_count >= ${this.MIN_TOTAL_RATING_COUNT}; sort first_release_date desc; limit ${limit};`
@@ -533,9 +535,9 @@ export class IGDBService {
 
   static async getComingSoonGames(
     limit = 20,
-    pageIndex = 0
+    pageIndex = 0,
+    cutoff = this.getReleaseCutoffEpoch()
   ): Promise<{ games: IGDBGame[]; total: number }> {
-    const cutoff = this.getReleaseCutoffEpoch()
     const where = `where first_release_date >= ${cutoff} & cover != null & ${EXCLUDE_EROTIC} & ${EXCLUDE_EDITIONS} & hypes >= ${this.MIN_HYPES} & game_status != ${GAME_STATUS.RUMORED}`
     const [games, rawTotal] = await Promise.all([
       this.request<IGDBGame[]>(
