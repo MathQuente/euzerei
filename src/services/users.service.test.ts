@@ -2273,3 +2273,100 @@ describe('UserService favorites', () => {
     expect(replaceFavorites).toHaveBeenCalledWith('user-1', [], null)
   })
 })
+
+describe('UserService.findRouletteGames', () => {
+  const entry = (igdbId: number) => ({
+    igdbId,
+    status: 'BACKLOG' as PaginatedUserGameRow['status'],
+    name: `Jogo ${igdbId}`,
+    slug: `jogo-${igdbId}`,
+    coverUrl: null,
+    platforms: [],
+    releaseDate: null,
+    rating: null,
+    completions: 0,
+    hoursPlayed: 0,
+    playedOn: [],
+    endless: false,
+    hundredPercent: false,
+    updatedAt: new Date('2026-11-10T12:00:00.000Z')
+  })
+
+  function build(total: number, rows = [entry(1), entry(2)]) {
+    const countGamesOfUser = vi.fn().mockResolvedValue(total)
+    const findManyGamesOfUser = vi.fn().mockResolvedValue(rows)
+    const service = new UserService(
+      fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        countGamesOfUser,
+        findManyGamesOfUser
+      }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+    return { service, countGamesOfUser, findManyGamesOfUser }
+  }
+
+  it('draws a random sample of the queue and reports the size of the whole queue', async () => {
+    const { service, countGamesOfUser, findManyGamesOfUser } = build(323)
+
+    const result = await service.findRouletteGames('user-1', { count: 24 })
+
+    expect(countGamesOfUser).toHaveBeenCalledWith({
+      userId: 'user-1',
+      filter: 'BACKLOG'
+    })
+    expect(findManyGamesOfUser).toHaveBeenCalledWith({
+      userId: 'user-1',
+      filter: 'BACKLOG',
+      skip: 0,
+      take: 24,
+      randomOrder: true,
+      excludeIgdbId: undefined
+    })
+    expect(result.total).toBe(323)
+    expect(result.games.map(g => g.igdbId)).toEqual([1, 2])
+  })
+
+  it('sends the last winner as excluded only while the queue is bigger than the wheel', async () => {
+    const big = build(30)
+    await big.service.findRouletteGames('user-1', { count: 24, exclude: 7 })
+    expect(big.findManyGamesOfUser).toHaveBeenCalledWith(
+      expect.objectContaining({ excludeIgdbId: 7 })
+    )
+
+    const exact = build(24)
+    await exact.service.findRouletteGames('user-1', { count: 24, exclude: 7 })
+    expect(exact.findManyGamesOfUser).toHaveBeenCalledWith(
+      expect.objectContaining({ excludeIgdbId: undefined })
+    )
+
+    const small = build(20)
+    await small.service.findRouletteGames('user-1', { count: 24, exclude: 7 })
+    expect(small.findManyGamesOfUser).toHaveBeenCalledWith(
+      expect.objectContaining({ excludeIgdbId: undefined })
+    )
+  })
+
+  it('sends the date of the last change as an ISO string through the real mapper', async () => {
+    const { service } = build(2)
+
+    const { games } = await service.findRouletteGames('user-1', { count: 24 })
+
+    expect(games[0].updatedAt).toBe('2026-11-10T12:00:00.000Z')
+  })
+
+  it('throws ClientError when the user does not exist', async () => {
+    const service = new UserService(
+      fakeUserRepository({ findUserById: vi.fn().mockResolvedValue(null) }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+
+    await expect(
+      service.findRouletteGames('missing', { count: 24 })
+    ).rejects.toThrow(ClientError)
+  })
+})

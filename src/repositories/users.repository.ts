@@ -411,7 +411,9 @@ export class UserRepository {
     skip,
     take,
     previewPerStatus,
-    uncappedStatuses = []
+    uncappedStatuses = [],
+    randomOrder = false,
+    excludeIgdbId
   }: {
     userId: string
     filter?: Status | typeof QUEUE_FILTER
@@ -422,11 +424,14 @@ export class UserRepository {
     take?: number
     previewPerStatus?: number
     uncappedStatuses?: Status[]
+    randomOrder?: boolean
+    excludeIgdbId?: number
   }): Promise<PaginatedUserGameRow[]> {
     const direction = sortOrder === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`
 
-    const orderByClause =
-      sortBy === 'gameName'
+    const orderByClause = randomOrder
+      ? Prisma.sql`random()`
+      : sortBy === 'gameName'
         ? Prisma.sql`gc.name ${direction} NULLS LAST`
         : sortBy === 'dateRelease'
           ? Prisma.sql`COALESCE(gc.release_date, 0) ${direction}`
@@ -440,6 +445,10 @@ export class UserRepository {
 
     const statusFilter = this.userGamesStatusFilter(filter)
     const queryFilter = this.userGamesQueryFilter(query)
+    const excludeFilter =
+      excludeIgdbId !== undefined
+        ? Prisma.sql`AND ug.igdb_id <> ${excludeIgdbId}`
+        : Prisma.empty
 
     const limitClause =
       take !== undefined
@@ -484,6 +493,7 @@ export class UserRepository {
       WHERE ug.user_id = ${userId}
       ${statusFilter}
       ${queryFilter}
+      ${excludeFilter}
       ORDER BY ${orderByClause}, ug.id
       ${limitClause}
     `

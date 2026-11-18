@@ -80,6 +80,19 @@ export class UserController {
     return reply.status(200).send({ totalPerStatus, games, total })
   }
 
+  async getRoulette(request: FastifyRequest, reply: FastifyReply) {
+    const { count, exclude } = UserSchema.RouletteQueryStringSchema.parse(
+      request.query
+    )
+
+    const result = await this.userService.findRouletteGames(
+      request.user.userId,
+      { count, exclude }
+    )
+
+    return reply.status(200).send(result)
+  }
+
   async getFavorites(request: FastifyRequest, reply: FastifyReply) {
     const { userId } = UserSchema.UserParamsSchema.parse(request.params)
 

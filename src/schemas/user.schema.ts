@@ -1,4 +1,4 @@
-import { MAX_FAVORITE_GAMES } from '../utils/library-status'
+import { MAX_FAVORITE_GAMES, ROULETTE_MAX_GAMES } from '../utils/library-status'
 import z from 'zod'
 import { isConsoleAllowed } from '../utils/platform-consoles'
 
@@ -392,4 +392,19 @@ export const GetFavoritesResponseSchema = z.object({
       isMain: z.boolean()
     })
   )
+})
+
+export const RouletteQueryStringSchema = z.object({
+  count: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(ROULETTE_MAX_GAMES)
+    .default(ROULETTE_MAX_GAMES),
+  exclude: z.coerce.number().int().positive().max(2147483647).optional()
+})
+
+export const GetRouletteResponseSchema = z.object({
+  total: z.number(),
+  games: z.array(UserGameEntrySchema)
 })

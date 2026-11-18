@@ -23,3 +23,4 @@ export const CLEAR_HUNDRED_PERCENT = {
 } as const
 
 export const MAX_FAVORITE_GAMES = 4
+export const ROULETTE_MAX_GAMES = 24

@@ -337,6 +337,22 @@ export async function userRoutes(app: FastifyInstance) {
   )
 
   app.withTypeProvider<ZodTypeProvider>().get(
+    '/roulette',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        querystring: UserSchema.RouletteQueryStringSchema,
+        response: {
+          200: UserSchema.GetRouletteResponseSchema,
+          404: ErrorSchemas.NotFound,
+          500: ErrorSchemas.InternalServerError
+        }
+      }
+    },
+    async (request, reply) => userController.getRoulette(request, reply)
+  )
+
+  app.withTypeProvider<ZodTypeProvider>().get(
     '/userGames',
     {
       preHandler: [app.authenticate],

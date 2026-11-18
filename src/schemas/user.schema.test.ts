@@ -9,7 +9,8 @@ import {
   UserGameCompletedAtUpdateBodySchema,
   ConsoleEnumSchema,
   UserGamePlayedCountUpdateBodySchema,
-  SetFavoritesBodySchema
+  SetFavoritesBodySchema,
+  RouletteQueryStringSchema
 } from './user.schema'
 
 describe('UpdateUserBodySchema', () => {
@@ -174,5 +175,31 @@ describe('SetFavoritesBodySchema', () => {
     expect(
       SetFavoritesBodySchema.safeParse({ igdbIds: [3000000000] }).success
     ).toBe(false)
+  })
+})
+
+describe('RouletteQueryStringSchema', () => {
+  it('uses 24 games when no count is given and exclude is optional', () => {
+    expect(RouletteQueryStringSchema.parse({})).toEqual({ count: 24 })
+  })
+
+  it('reads count and exclude sent as query strings', () => {
+    expect(
+      RouletteQueryStringSchema.parse({ count: '10', exclude: '252647' })
+    ).toEqual({ count: 10, exclude: 252647 })
+  })
+
+  it('refuses a count outside 1 to 24 or not a whole number', () => {
+    for (const count of ['0', '25', '-3', '2.5', 'abc']) {
+      expect(RouletteQueryStringSchema.safeParse({ count }).success).toBe(false)
+    }
+  })
+
+  it('refuses an exclude that is not a positive id inside the database range', () => {
+    for (const exclude of ['0', '-1', 'abc', '3000000000']) {
+      expect(RouletteQueryStringSchema.safeParse({ exclude }).success).toBe(
+        false
+      )
+    }
   })
 })

@@ -348,6 +348,33 @@ export class UserService {
     return { games }
   }
 
+  async findRouletteGames(
+    userId: string,
+    { count, exclude }: { count: number; exclude?: number }
+  ) {
+    await this.requireUser(userId)
+
+    const total = await this.userRepository.countGamesOfUser({
+      userId,
+      filter: Status.BACKLOG
+    })
+    const excludeIgdbId =
+      exclude !== undefined && total > count ? exclude : undefined
+
+    const rows = await this.userRepository.findManyGamesOfUser({
+      userId,
+      filter: Status.BACKLOG,
+      skip: 0,
+      take: count,
+      randomOrder: true,
+      excludeIgdbId
+    })
+    const games =
+      await this.fillMissingGameCacheEntries<PaginatedUserGameRow>(rows)
+
+    return { total, games }
+  }
+
   async setFavorites(
     userId: string,
     igdbIds: number[],
