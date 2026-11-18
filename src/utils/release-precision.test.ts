@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { precisionFromFormat, releaseDatePrecision } from './release-precision'
+import {
+  asReleasePrecision,
+  precisionFromFormat,
+  releaseDatePrecision
+} from './release-precision'
 
 const GTA = 1795046400 // 2026-11-19
 const NEW_YEAR_EVE = 1798675200 // 2026-12-31
@@ -64,6 +68,21 @@ describe('releaseDatePrecision', () => {
     ).toBe('tbd')
   })
 
+  it('é desconhecida (não "tbd") quando a entrada da mesma data não tem formato conhecido', () => {
+    expect(
+      releaseDatePrecision(GTA, [
+        { date: GTA },
+        { date: NEW_YEAR_EVE, date_format: 0 }
+      ])
+    ).toBeUndefined()
+    expect(
+      releaseDatePrecision(GTA, [
+        { date: GTA, date_format: 99 },
+        { date: NEW_YEAR_EVE, date_format: 0 }
+      ])
+    ).toBeUndefined()
+  })
+
   it('é desconhecida sem release_dates ou sem date_format', () => {
     expect(releaseDatePrecision(GTA, undefined)).toBeUndefined()
     expect(releaseDatePrecision(GTA, [])).toBeUndefined()
@@ -79,5 +98,18 @@ describe('precisionFromFormat', () => {
     expect(precisionFromFormat(3)).toBe('q1')
     expect(precisionFromFormat(99)).toBeUndefined()
     expect(precisionFromFormat(undefined)).toBeUndefined()
+  })
+})
+
+describe('asReleasePrecision', () => {
+  it('aceita os valores conhecidos e descarta o resto', () => {
+    expect(asReleasePrecision('year')).toBe('year')
+    expect(asReleasePrecision('q4')).toBe('q4')
+    expect(asReleasePrecision('tbd')).toBe('tbd')
+    expect(asReleasePrecision('quarter')).toBeUndefined()
+    expect(asReleasePrecision('toString')).toBeUndefined()
+    expect(asReleasePrecision('')).toBeUndefined()
+    expect(asReleasePrecision(null)).toBeUndefined()
+    expect(asReleasePrecision(undefined)).toBeUndefined()
   })
 })

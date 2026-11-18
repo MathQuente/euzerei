@@ -1,5 +1,15 @@
-export type ReleasePrecision =
-  'day' | 'month' | 'q1' | 'q2' | 'q3' | 'q4' | 'year' | 'tbd'
+export const RELEASE_PRECISIONS = [
+  'day',
+  'month',
+  'q1',
+  'q2',
+  'q3',
+  'q4',
+  'year',
+  'tbd'
+] as const
+
+export type ReleasePrecision = (typeof RELEASE_PRECISIONS)[number]
 
 interface ReleaseDateEntry {
   date?: number
@@ -30,6 +40,13 @@ const PRECISION_RANK: Record<ReleasePrecision, number> = {
   tbd: 4
 }
 
+/** Valida o texto guardado no banco: um valor desconhecido vira "sem precisão". */
+export function asReleasePrecision(
+  value: string | null | undefined
+): ReleasePrecision | undefined {
+  return RELEASE_PRECISIONS.find(precision => precision === value)
+}
+
 export function precisionFromFormat(
   dateFormat: number | undefined
 ): ReleasePrecision | undefined {
@@ -58,7 +75,16 @@ export function releaseDatePrecision(
   const matching = known
     .filter(entry => entry.date === firstReleaseDate)
     .map(entry => precisionFromFormat(entry.date_format) as ReleasePrecision)
-  if (matching.length === 0) return 'tbd'
+  if (matching.length === 0) {
+    // Uma entrada com a mesma data mas sem formato conhecido não prova que a
+    // data foi inventada: a precisão fica desconhecida, e não "tbd".
+    const sameDateUnknown = releaseDates.some(
+      entry =>
+        entry.date === firstReleaseDate &&
+        precisionFromFormat(entry.date_format) === undefined
+    )
+    return sameDateUnknown ? undefined : 'tbd'
+  }
 
   return matching.reduce((best, current) =>
     PRECISION_RANK[current] < PRECISION_RANK[best] ? current : best

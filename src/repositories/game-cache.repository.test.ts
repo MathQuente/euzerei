@@ -197,7 +197,7 @@ describe('GameCacheRepository.updateReleaseDates', () => {
     expect(execute).not.toHaveBeenCalled()
   })
 
-  it('writes dates and NULL in one statement that only sets release_date', async () => {
+  it('writes dates and NULL in one statement that sets release_date and clears the precision', async () => {
     const execute = vi.spyOn(prisma, '$executeRaw').mockResolvedValue(2)
 
     const written = await new GameCacheRepository().updateReleaseDates([
@@ -211,6 +211,7 @@ describe('GameCacheRepository.updateReleaseDates', () => {
     const text = sql.strings.join('?')
     expect(text.match(/\bSET\b/g)).toHaveLength(1)
     expect(text).toContain('SET release_date = v.release_date')
+    expect(text).toContain('release_date_precision = NULL')
     expect(text).toContain('IS DISTINCT FROM')
     expect(JSON.parse(String(sql.values[0]))).toEqual([
       { id: 1, release_date: 1793836800 },
@@ -349,5 +350,40 @@ describe('GameCacheRepository.restoreCoverUrls', () => {
 
     expect(await new GameCacheRepository().restoreCoverUrls(rows, true)).toBe(1)
     expect(execute).not.toHaveBeenCalled()
+  })
+})
+
+describe('GameCacheRepository.upsertMany', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('stores the release date precision, NULL when unknown', async () => {
+    const create = vi
+      .spyOn(prisma.gameCache, 'createMany')
+      .mockResolvedValue({ count: 2 })
+    const repository = new GameCacheRepository()
+    vi.spyOn(
+      repository as unknown as { assignMissingSlugs: () => Promise<void> },
+      'assignMissingSlugs'
+    ).mockResolvedValue(undefined)
+
+    await repository.upsertMany([
+      {
+        igdbId: 1,
+        name: 'A',
+        coverUrl: null,
+        genres: [],
+        platforms: [],
+        releaseDate: 1798675200,
+        releaseDatePrecision: 'year'
+      },
+      { igdbId: 2, name: 'B', coverUrl: null, genres: [], platforms: [] }
+    ])
+
+    const data = create.mock.calls[0][0]?.data as Array<{
+      releaseDatePrecision: string | null
+    }>
+    expect(data.map(row => row.releaseDatePrecision)).toEqual(['year', null])
   })
 })

@@ -319,6 +319,44 @@ describe('IGDBService.isEndlessFranchise', () => {
 })
 
 describe('IGDBService.toGameCacheInput', () => {
+  it('stores how exact the release date is, from release_dates', () => {
+    const YEAR_END = 1798675200 // 2026-12-31
+
+    expect(
+      IGDBService.toGameCacheInput({
+        id: 1,
+        name: 'A',
+        first_release_date: YEAR_END,
+        release_dates: [{ date: YEAR_END, date_format: 2 }]
+      } as IGDBGame).releaseDatePrecision
+    ).toBe('year')
+    expect(
+      IGDBService.toGameCacheInput({
+        id: 2,
+        name: 'B',
+        first_release_date: 1795046400,
+        release_dates: [{ date: 1795046400, date_format: 0 }]
+      } as IGDBGame).releaseDatePrecision
+    ).toBe('day')
+  })
+
+  it('leaves the precision unknown without release_dates or without a date', () => {
+    expect(
+      IGDBService.toGameCacheInput({
+        id: 1,
+        name: 'A',
+        first_release_date: 1795046400
+      } as IGDBGame).releaseDatePrecision
+    ).toBeUndefined()
+    expect(
+      IGDBService.toGameCacheInput({
+        id: 2,
+        name: 'B',
+        release_dates: [{ date: 1795046400, date_format: 0 }]
+      } as IGDBGame).releaseDatePrecision
+    ).toBeUndefined()
+  })
+
   it('keeps the numeric game mode ids', () => {
     const input = IGDBService.toGameCacheInput({
       id: 1,
@@ -832,5 +870,28 @@ describe('IGDBService.getReleaseCutoffEpoch', () => {
   it('crosses a month and a year boundary', () => {
     expect(cutoffAt('2026-12-31T20:00:00Z')).toBe(midnightUtc('2027-01-01'))
     expect(cutoffAt('2026-02-28T12:00:00Z')).toBe(midnightUtc('2026-03-01'))
+  })
+})
+
+describe('IGDBService queries that feed games_cache ask for the date format', () => {
+  it.each([
+    ['getGamesByIds', () => IGDBService.getGamesByIds([1])],
+    ['searchGamesByName', () => IGDBService.searchGamesByName('zelda', [6])],
+    ['fetchForSync', () => IGDBService.fetchForSync(0, 500)],
+    [
+      'fetchMissingReleasedContent',
+      () => IGDBService.fetchMissingReleasedContent(0, 1000, 500)
+    ]
+  ])('%s requests release_dates.date and date_format', async (_name, call) => {
+    const request = mockRequest([])
+
+    await call()
+
+    const bodies = request.mock.calls.map(([, body]) => String(body))
+    expect(
+      bodies.some(body =>
+        /fields [^;]*release_dates\.date,release_dates\.date_format/.test(body)
+      )
+    ).toBe(true)
   })
 })

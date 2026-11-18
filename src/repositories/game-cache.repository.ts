@@ -5,6 +5,7 @@ import { GameCacheSortBy, GameCacheSortOrder } from '../types/game-cache'
 import { GAME_STATUS } from '../utils/game-status'
 import { isUniqueViolation } from '../utils/prisma-errors'
 import { slugCandidates, uniqueSlug } from '../utils/game-slug'
+import type { ReleasePrecision } from '../utils/release-precision'
 
 const MIN_TOTAL_RATING_COUNT = 10
 const MIN_HYPES = 5
@@ -111,6 +112,7 @@ export class GameCacheRepository {
           genres: true,
           platforms: true,
           releaseDate: true,
+          releaseDatePrecision: true,
           category: true,
           parentGameId: true
         }
@@ -143,12 +145,13 @@ export class GameCacheRepository {
           genres: string[]
           platforms: string[]
           release_date: number | null
+          release_date_precision: string | null
           category: number | null
           parent_game_id: number | null
         }>
       >(Prisma.sql`
         SELECT gc.igdb_id, gc.slug, gc.name, gc.cover_url, gc.summary, gc.genres, gc.platforms, gc.release_date,
-               gc.category, gc.parent_game_id
+               gc.release_date_precision, gc.category, gc.parent_game_id
         FROM games_cache gc
         ${where}
         ORDER BY ${relevanceOrderSql(query)}
@@ -169,6 +172,7 @@ export class GameCacheRepository {
         genres: g.genres,
         platforms: g.platforms,
         releaseDate: g.release_date,
+        releaseDatePrecision: g.release_date_precision,
         category: g.category,
         parentGameId: g.parent_game_id
       })),
@@ -204,12 +208,13 @@ export class GameCacheRepository {
           genres: string[]
           platforms: string[]
           release_date: number | null
+          release_date_precision: string | null
           category: number | null
           parent_game_id: number | null
         }>
       >(Prisma.sql`
         SELECT gc.igdb_id, gc.slug, gc.name, gc.cover_url, gc.summary, gc.genres, gc.platforms, gc.release_date,
-               gc.category, gc.parent_game_id,
+               gc.release_date_precision, gc.category, gc.parent_game_id,
                AVG(r.value) as avg_rating
         FROM games_cache gc
         LEFT JOIN ratings r ON r.igdb_id = gc.igdb_id
@@ -233,6 +238,7 @@ export class GameCacheRepository {
         genres: g.genres,
         platforms: g.platforms,
         releaseDate: g.release_date,
+        releaseDatePrecision: g.release_date_precision,
         category: g.category,
         parentGameId: g.parent_game_id
       })),
@@ -249,6 +255,7 @@ export class GameCacheRepository {
       genres: string[]
       platforms: string[]
       releaseDate?: number
+      releaseDatePrecision?: ReleasePrecision
       hypes?: number
       totalRatingCount?: number
       category?: number
@@ -266,6 +273,7 @@ export class GameCacheRepository {
         genres: g.genres,
         platforms: g.platforms,
         releaseDate: g.releaseDate ?? null,
+        releaseDatePrecision: g.releaseDatePrecision ?? null,
         hypes: g.hypes ?? 0,
         totalRatingCount: g.totalRatingCount ?? 0,
         category: g.category ?? -1,
@@ -521,7 +529,8 @@ export class GameCacheRepository {
     )
     return prisma.$executeRaw(Prisma.sql`
       UPDATE games_cache gc
-      SET release_date = v.release_date
+      SET release_date = v.release_date,
+          release_date_precision = NULL
       FROM jsonb_to_recordset(${rows}::jsonb) AS v(id int, release_date int)
       WHERE gc.igdb_id = v.id
         AND gc.release_date IS DISTINCT FROM v.release_date

@@ -342,3 +342,52 @@ describe('GameService home lists cache', () => {
     ])
   })
 })
+
+describe('GameService.findAllGames', () => {
+  it('returns the release date precision kept in the cache, and only a known one', async () => {
+    const cacheRow = (igdbId: number, precision: string | null) => ({
+      igdbId,
+      slug: null,
+      name: `Game ${igdbId}`,
+      coverUrl: null,
+      summary: null,
+      genres: [],
+      platforms: [],
+      releaseDate: 1798675200,
+      releaseDatePrecision: precision,
+      category: 0,
+      parentGameId: null
+    })
+    const service = new GameService(
+      {
+        getAverageRatingsForGames: vi.fn().mockResolvedValue(new Map())
+      } as unknown as RatingRepository,
+      {
+        findMany: vi.fn().mockResolvedValue({
+          games: [
+            cacheRow(1, 'year'),
+            cacheRow(2, null),
+            cacheRow(3, 'garbage')
+          ],
+          total: 3
+        })
+      } as unknown as GameCacheRepository,
+      {} as UserRepository,
+      {} as CacheRepository
+    )
+
+    const { games } = await service.findAllGames(
+      undefined,
+      20,
+      0,
+      'release_date',
+      'desc'
+    )
+
+    expect(games.map(g => g.releaseDatePrecision)).toEqual([
+      'year',
+      undefined,
+      undefined
+    ])
+  })
+})

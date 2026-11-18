@@ -8,6 +8,7 @@ import { CacheRepository } from '../repositories/cache.repository'
 import { isHiddenFromCatalog } from '../utils/game-status'
 import {
   type ReleasePrecision,
+  asReleasePrecision,
   precisionFromFormat,
   releaseDatePrecision
 } from '../utils/release-precision'
@@ -185,6 +186,7 @@ export class GameService {
       genres: g.genres.length > 0 ? g.genres : undefined,
       platforms: g.platforms.length > 0 ? g.platforms : undefined,
       releaseDate: g.releaseDate ?? undefined,
+      releaseDatePrecision: asReleasePrecision(g.releaseDatePrecision),
       rating: ratingsMap.get(g.igdbId) ?? null,
       category: g.category ?? -1,
       parentGameId: g.parentGameId ?? null

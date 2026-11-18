@@ -23,6 +23,7 @@ export type PaginatedUserGameRow = {
   coverUrl: string | null
   platforms: string[] | null
   releaseDate: number | null
+  releaseDatePrecision?: string | null
   rating: number | null
   completions: number
   hoursPlayed: number

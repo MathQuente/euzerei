@@ -866,6 +866,83 @@ describe('UserService.findManyUserGames', () => {
     expect(result.total).toBe(2)
   })
 
+  it('returns the release date precision from the cache and works it out for rows fetched from IGDB', async () => {
+    const base = {
+      status: 'BACKLOG' as PaginatedUserGameRow['status'],
+      slug: null,
+      completions: 0,
+      hoursPlayed: 0,
+      playedOn: [],
+      endless: false,
+      hundredPercent: false,
+      rating: null
+    }
+    const rows: PaginatedUserGameRow[] = [
+      {
+        ...base,
+        igdbId: 1,
+        name: 'Cached',
+        coverUrl: null,
+        platforms: [],
+        releaseDate: 1798675200,
+        releaseDatePrecision: 'year'
+      },
+      {
+        ...base,
+        igdbId: 2,
+        name: 'Cached without precision',
+        coverUrl: null,
+        platforms: [],
+        releaseDate: 1795046400,
+        releaseDatePrecision: null
+      },
+      {
+        ...base,
+        igdbId: 3,
+        name: null,
+        coverUrl: null,
+        platforms: null,
+        releaseDate: null,
+        releaseDatePrecision: null
+      }
+    ]
+    vi.spyOn(IGDBService, 'getGamesByIds').mockResolvedValue([
+      {
+        id: 3,
+        name: 'Fetched',
+        first_release_date: 1798675200,
+        release_dates: [{ date: 1798675200, date_format: 6 }]
+      }
+    ] as Awaited<ReturnType<typeof IGDBService.getGamesByIds>>)
+    const service = new UserService(
+      fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findManyGamesOfUser: vi.fn().mockResolvedValue(rows),
+        findGamesCountByStatus: vi
+          .fn()
+          .mockResolvedValue(statusCounts({ BACKLOG: 3 }))
+      }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+
+    const result = await service.findManyUserGames(
+      'user-1',
+      0,
+      undefined,
+      undefined,
+      'gameName',
+      'asc'
+    )
+
+    expect(result.games.BACKLOG.map(g => g.releaseDatePrecision)).toEqual([
+      'year',
+      undefined,
+      'q4'
+    ])
+  })
+
   it('backfills name/coverUrl/releaseDate from IGDB only for rows missing games_cache data', async () => {
     const rows: PaginatedUserGameRow[] = [
       {

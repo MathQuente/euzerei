@@ -1,5 +1,6 @@
 import { MAX_FAVORITE_GAMES, ROULETTE_MAX_GAMES } from '../utils/library-status'
 import z from 'zod'
+import { PrecisionSchema } from './game.schema'
 import { isConsoleAllowed } from '../utils/platform-consoles'
 
 export const DeleteUserResponseSchema = z.object({
@@ -236,6 +237,7 @@ const UserGameEntrySchema = z.object({
   coverUrl: z.string().nullable(),
   platforms: z.array(z.string()).optional(),
   releaseDate: z.number().optional(),
+  releaseDatePrecision: PrecisionSchema.optional(),
   rating: z.number().nullable(),
   completions: z.number(),
   hoursPlayed: z.number(),

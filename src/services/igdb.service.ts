@@ -2,6 +2,7 @@ import { IGDBRequestError } from '../errors/igdb-request-error'
 import { IGDBGame } from '../types/igdb'
 import { fetchWithTimeout } from '../utils/fetch-with-timeout'
 import { GAME_STATUS, isHiddenFromCatalog } from '../utils/game-status'
+import { releaseDatePrecision } from '../utils/release-precision'
 
 const EROTIC_THEME_ID = 42
 
@@ -139,6 +140,8 @@ export class IGDBService {
   }
 
   static toGameCacheInput(g: IGDBGame) {
+    const releaseDate =
+      this.toCacheReleaseDate(g.first_release_date) ?? undefined
     return {
       igdbId: g.id,
       name: g.name,
@@ -146,7 +149,8 @@ export class IGDBService {
       summary: g.summary,
       genres: g.genres?.map(x => x.name) ?? [],
       platforms: g.platforms?.map(x => x.name) ?? [],
-      releaseDate: this.toCacheReleaseDate(g.first_release_date) ?? undefined,
+      releaseDate,
+      releaseDatePrecision: releaseDatePrecision(releaseDate, g.release_dates),
       hypes: g.hypes ?? 0,
       totalRatingCount: g.total_rating_count ?? 0,
       category: this.getGameType(g),
@@ -235,7 +239,7 @@ export class IGDBService {
     if (ids.length === 0) return []
     return this.request(
       'games',
-      `where id = (${ids.join(',')}); fields id,name,summary,cover.url,genres.name,themes.name,platforms.name,game_modes.name,first_release_date,category,game_type,parent_game,rating,follows,game_status; limit ${Math.min(ids.length, 500)};`
+      `where id = (${ids.join(',')}); fields id,name,summary,cover.url,genres.name,themes.name,platforms.name,game_modes.name,first_release_date,release_dates.date,release_dates.date_format,category,game_type,parent_game,rating,follows,game_status; limit ${Math.min(ids.length, 500)};`
     )
   }
 
@@ -311,7 +315,7 @@ export class IGDBService {
     if (!term) return []
     return this.request(
       'games',
-      `search "${term}"; fields id,name,alternative_names.name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,category,game_type,parent_game,rating,follows,total_rating_count,game_status; where platforms = (${platformIds.join(',')}); limit 10;`
+      `search "${term}"; fields id,name,alternative_names.name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,release_dates.date,release_dates.date_format,category,game_type,parent_game,rating,follows,total_rating_count,game_status; where platforms = (${platformIds.join(',')}); limit 10;`
     )
   }
 
@@ -341,7 +345,7 @@ export class IGDBService {
   ): Promise<IGDBGame[]> {
     return this.request(
       'games',
-      `fields id,name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,hypes,total_rating_count,category,game_type,parent_game,game_status; where id > ${lastId} & cover != null & ${EXCLUDE_EROTIC}; sort id asc; limit ${limit};`
+      `fields id,name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,release_dates.date,release_dates.date_format,hypes,total_rating_count,category,game_type,parent_game,game_status; where id > ${lastId} & cover != null & ${EXCLUDE_EROTIC}; sort id asc; limit ${limit};`
     )
   }
 
@@ -352,7 +356,7 @@ export class IGDBService {
   ): Promise<IGDBGame[]> {
     return this.request(
       'games',
-      `fields id,name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,hypes,total_rating_count,category,game_type,parent_game,game_status; where id > ${lastId} & id <= ${maxId} & cover != null & ${EXCLUDE_EROTIC} & parent_game != null; sort id asc; limit ${limit};`
+      `fields id,name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,release_dates.date,release_dates.date_format,hypes,total_rating_count,category,game_type,parent_game,game_status; where id > ${lastId} & id <= ${maxId} & cover != null & ${EXCLUDE_EROTIC} & parent_game != null; sort id asc; limit ${limit};`
     )
   }
 

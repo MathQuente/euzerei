@@ -512,6 +512,7 @@ export class UserRepository {
         gc.cover_url                  AS "coverUrl",
         gc.platforms                  AS "platforms",
         gc.release_date               AS "releaseDate",
+        gc.release_date_precision     AS "releaseDatePrecision",
         r.value                       AS "rating",
         COALESCE(ugst.completions, 0) AS "completions",
         COALESCE(ugst.hours_played, 0)::float AS "hoursPlayed",
@@ -553,7 +554,7 @@ export class UserRepository {
         ranked."igdbId", ranked."status", ranked."endless", ranked."hundredPercent",
         ranked."updatedAt", ranked."droppedAt",
         ranked."name",
-        ranked."slug", ranked."coverUrl", ranked."platforms", ranked."releaseDate",
+        ranked."slug", ranked."coverUrl", ranked."platforms", ranked."releaseDate", ranked."releaseDatePrecision",
         ranked."rating", ranked."completions", ranked."hoursPlayed",
         ranked."playedOn"
       FROM (${rows}) ranked
@@ -647,6 +648,7 @@ export class UserRepository {
         gc.cover_url                  AS "coverUrl",
         gc.platforms                  AS "platforms",
         gc.release_date               AS "releaseDate",
+        gc.release_date_precision     AS "releaseDatePrecision",
         r.value                       AS "rating",
         COALESCE(ugst.completions, 0) AS "completions",
         COALESCE(ugst.hours_played, 0)::float AS "hoursPlayed",

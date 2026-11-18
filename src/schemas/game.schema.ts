@@ -1,15 +1,7 @@
 import { z } from 'zod'
+import { RELEASE_PRECISIONS } from '../utils/release-precision'
 
-const PrecisionSchema = z.enum([
-  'day',
-  'month',
-  'q1',
-  'q2',
-  'q3',
-  'q4',
-  'year',
-  'tbd'
-])
+export const PrecisionSchema = z.enum(RELEASE_PRECISIONS)
 
 export const IGDBGameSchema = z.object({
   igdbId: z.number(),

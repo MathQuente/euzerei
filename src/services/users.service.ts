@@ -13,6 +13,10 @@ import { UserGamePlatformRepository } from '../repositories/user-game-platform.r
 import { CacheRepository } from '../repositories/cache.repository'
 import { markSessionsRevoked } from '../utils/session-revocation'
 import {
+  asReleasePrecision,
+  releaseDatePrecision
+} from '../utils/release-precision'
+import {
   emailChangeCurrentKey,
   parsePendingEmailChange
 } from '../utils/email-change'
@@ -645,6 +649,7 @@ export class UserService {
             coverUrl: r.coverUrl,
             platforms: r.platforms ?? undefined,
             releaseDate: r.releaseDate ?? undefined,
+            releaseDatePrecision: asReleasePrecision(r.releaseDatePrecision),
             rating: r.rating,
             completions: r.completions,
             hoursPlayed: r.hoursPlayed,
@@ -667,6 +672,10 @@ export class UserService {
           coverUrl: IGDBService.formatCoverUrl(g.cover?.url),
           platforms: g.platforms?.map(p => p.name),
           releaseDate: g.first_release_date,
+          releaseDatePrecision: releaseDatePrecision(
+            g.first_release_date,
+            g.release_dates
+          ),
           rating: r.rating,
           completions: r.completions,
           hoursPlayed: r.hoursPlayed,
