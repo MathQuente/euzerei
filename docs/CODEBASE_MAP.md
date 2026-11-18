@@ -322,7 +322,7 @@ Ratings (cross-user average) and the caller's library data are never cached; the
 
 **External ids** (`getGamesByExternalIds`): queries the `external_games` endpoint by `uid` and `external_game_source` in chunks of 500 uids, each chunk read in pages of 500 rows (`sort id asc; limit 500; offset N`, so a uid with several rows never gets cut), then fetches the games. Sources: 1 Steam, 36 PlayStation, 11 Xbox.
 
-**"Released" cutoff**: the next midnight in `America/Fortaleza`. **`release_dates` dedup**: one row per platform+region; the detail endpoint groups by platform and keeps the earliest date.
+**"Released" cutoff** (`getReleaseCutoffEpoch`): midnight **UTC** of tomorrow's calendar date, taking "today" in `America/Fortaleza`. IGDB stores `first_release_date` at 00:00 UTC of the release day (every cached row does), so a game dated tomorrow stays in "coming soon" and one dated today counts as released. Using the local midnight expressed in UTC (03:00 UTC) pushed tomorrow's games out of "coming soon" a day early, which is how Grand Theft Auto VI disappeared the day before its launch. **`release_dates` dedup**: one row per platform+region; the detail endpoint groups by platform and keeps the earliest date.
 
 ## Redis Usage
 

@@ -194,22 +194,13 @@ export class IGDBService {
 
   static readonly MIN_HYPES = 5
   static readonly MIN_TOTAL_RATING_COUNT = 10
-  private static readonly RELEASE_CUTOFF_UTC_OFFSET_HOURS = 3
 
   static getReleaseCutoffEpoch(): number {
     const [year, month, day] = new Date()
       .toLocaleDateString('en-CA', { timeZone: 'America/Fortaleza' })
       .split('-')
       .map(Number)
-    const tomorrowUTC = Date.UTC(
-      year,
-      month - 1,
-      day + 1,
-      this.RELEASE_CUTOFF_UTC_OFFSET_HOURS,
-      0,
-      0
-    )
-    return Math.floor(tomorrowUTC / 1000)
+    return Math.floor(Date.UTC(year, month - 1, day + 1) / 1000)
   }
 
   static async getGameById(igdbId: number): Promise<IGDBGame | null> {

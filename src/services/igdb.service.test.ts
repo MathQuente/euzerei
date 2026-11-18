@@ -774,3 +774,38 @@ describe('IGDBService.getRelatedGames', () => {
     expect(result.map(g => g.id)).toEqual([1, 5])
   })
 })
+
+describe('IGDBService.getReleaseCutoffEpoch', () => {
+  const midnightUtc = (iso: string) => Date.parse(`${iso}T00:00:00Z`) / 1000
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function cutoffAt(instant: string) {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(instant))
+    return IGDBService.getReleaseCutoffEpoch()
+  }
+
+  it('is midnight UTC of the next day in Brazil, the way IGDB stores release dates', () => {
+    expect(cutoffAt('2026-11-18T13:00:00Z')).toBe(midnightUtc('2026-11-19'))
+  })
+
+  it('keeps a game dated tomorrow in "coming soon" and one dated today out of it', () => {
+    const cutoff = cutoffAt('2026-11-18T13:00:00Z')
+
+    expect(midnightUtc('2026-11-19')).toBeGreaterThanOrEqual(cutoff)
+    expect(midnightUtc('2026-11-18')).toBeLessThan(cutoff)
+  })
+
+  it('keeps the same cutoff until it is midnight in Fortaleza, then moves one day', () => {
+    expect(cutoffAt('2026-11-19T02:59:00Z')).toBe(midnightUtc('2026-11-19'))
+    expect(cutoffAt('2026-11-19T03:00:00Z')).toBe(midnightUtc('2026-11-20'))
+  })
+
+  it('crosses a month and a year boundary', () => {
+    expect(cutoffAt('2026-12-31T20:00:00Z')).toBe(midnightUtc('2027-01-01'))
+    expect(cutoffAt('2026-02-28T12:00:00Z')).toBe(midnightUtc('2026-03-01'))
+  })
+})
