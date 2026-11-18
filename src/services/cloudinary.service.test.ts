@@ -95,7 +95,7 @@ describe('CloudinaryService', () => {
       vi.restoreAllMocks()
     })
 
-    it('signs the fixed folder, formats, preset and server timestamp', () => {
+    it('signs the fixed folder, formats, preset, timestamp and a server id', () => {
       const result = CloudinaryService.createUploadSignature()
 
       expect(result).toEqual({
@@ -103,11 +103,12 @@ describe('CloudinaryService', () => {
         apiKey: 'key',
         timestamp: 1_700_000_000,
         folder: 'images',
+        publicId: expect.stringMatching(/^[0-9a-f-]{36}$/),
         allowedFormats: 'jpg,png,webp',
         uploadPreset: 'signed_preset',
         signature: createHash('sha1')
           .update(
-            'allowed_formats=jpg,png,webp&folder=images&timestamp=1700000000&upload_preset=signed_presetsecret'
+            `allowed_formats=jpg,png,webp&folder=images&public_id=${result.publicId}&timestamp=1700000000&upload_preset=signed_presetsecret`
           )
           .digest('hex')
       })
@@ -127,10 +128,16 @@ describe('CloudinaryService', () => {
       )
     })
 
+    it('gives each signature its own id', () => {
+      const first = CloudinaryService.createUploadSignature()
+      const second = CloudinaryService.createUploadSignature()
+      expect(first.publicId).not.toBe(second.publicId)
+      expect(first.signature).not.toBe(second.signature)
+    })
+
     it('keeps isConfigured independent of the preset', () => {
       vi.stubEnv('CLOUDINARY_UPLOAD_PRESET', '')
       expect(CloudinaryService.isConfigured()).toBe(true)
-      expect(CloudinaryService.isUploadConfigured()).toBe(false)
     })
   })
 

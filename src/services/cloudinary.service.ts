@@ -1,4 +1,4 @@
-import { createHash } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { fetchWithTimeout } from '../utils/fetch-with-timeout'
 import { ClientError } from '../errors/client-error'
 
@@ -14,6 +14,7 @@ export type UploadSignature = {
   apiKey: string
   timestamp: number
   folder: string
+  publicId: string
   allowedFormats: string
   uploadPreset: string
   signature: string
@@ -39,13 +40,6 @@ export class CloudinaryService {
     )
   }
 
-  static isUploadConfigured(): boolean {
-    return (
-      CloudinaryService.isConfigured() &&
-      Boolean(process.env.CLOUDINARY_UPLOAD_PRESET)
-    )
-  }
-
   static createUploadSignature(): UploadSignature {
     const cloudName = process.env.CLOUDINARY_CLOUD_NAME
     const apiKey = process.env.CLOUDINARY_API_KEY
@@ -56,11 +50,16 @@ export class CloudinaryService {
       throw new ClientError('Envio de imagens indisponível no momento.', 503)
     }
 
+    // The id is signed, so one signature authorizes one asset: replaying it
+    // targets the same id (the preset has overwrite off) instead of creating
+    // a new asset each time.
+    const publicId = randomUUID()
     const timestamp = Math.floor(Date.now() / 1000)
     const signature = signUpload(
       {
         allowed_formats: UPLOAD_ALLOWED_FORMATS,
         folder: UPLOAD_FOLDER,
+        public_id: publicId,
         timestamp,
         upload_preset: uploadPreset
       },
@@ -72,6 +71,7 @@ export class CloudinaryService {
       apiKey,
       timestamp,
       folder: UPLOAD_FOLDER,
+      publicId,
       allowedFormats: UPLOAD_ALLOWED_FORMATS,
       uploadPreset,
       signature

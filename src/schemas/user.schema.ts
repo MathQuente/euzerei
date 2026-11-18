@@ -327,6 +327,7 @@ export const ImageUploadSignatureResponseSchema = z.object({
   apiKey: z.string(),
   timestamp: z.number().int(),
   folder: z.string(),
+  publicId: z.string(),
   allowedFormats: z.string(),
   uploadPreset: z.string(),
   signature: z.string()

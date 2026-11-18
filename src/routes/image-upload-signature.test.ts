@@ -1,80 +1,65 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fastify, { FastifyInstance } from 'fastify'
-import fastifyJwt from '@fastify/jwt'
-import fastifyCookie from '@fastify/cookie'
 import fastifyRateLimit from '@fastify/rate-limit'
 import {
   serializerCompiler,
-  validatorCompiler,
-  ZodTypeProvider
+  validatorCompiler
 } from 'fastify-type-provider-zod'
-import { errorHandler } from '../error-handler'
-import { ErrorSchemas } from '../schemas/error.schema'
-import * as UserSchema from '../schemas/user.schema'
-import { CloudinaryService } from '../services/cloudinary.service'
-import { userRateLimit } from '../utils/user-rate-limit'
-import { respondUnauthorized } from '../utils/respond-unauthorized'
 
-const SECRET = 'a'.repeat(40)
+vi.mock('../database/db', () => ({ prisma: {} }))
+vi.mock('../database/redis', () => ({ redis: {} }))
+vi.mock('../repositories/cache.repository', () => ({
+  CacheRepository: class {
+    get = vi.fn().mockResolvedValue(null)
+    set = vi.fn()
+  }
+}))
+
+import { errorHandler } from '../error-handler'
+import { Jwt } from '../jwt'
+import { AuthService } from '../services/auth.service'
+import { userRoutes } from './users'
+
+const GOOD_REFRESH = 'good-refresh-token'
 
 async function buildApp() {
   const app = fastify()
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
   app.setErrorHandler(errorHandler)
-  await app.register(fastifyCookie)
-  await app.register(fastifyJwt, {
-    secret: SECRET,
-    cookie: { cookieName: 'accessToken', signed: false }
-  })
+  Jwt.initSetup(app)
   await app.register(fastifyRateLimit, { max: 300, timeWindow: '1 minute' })
-
-  app.decorate('authenticate', async (request, reply) => {
-    try {
-      await request.jwtVerify({ onlyCookie: true })
-    } catch {
-      return respondUnauthorized(reply)
-    }
-  })
-
-  app.withTypeProvider<ZodTypeProvider>().post(
-    '/image-upload-signature',
-    {
-      preHandler: [app.authenticate],
-      config: { rateLimit: userRateLimit('image-upload', 10) },
-      schema: {
-        response: {
-          200: UserSchema.ImageUploadSignatureResponseSchema,
-          503: ErrorSchemas.InternalServerError
-        }
-      }
-    },
-    async (_request, reply) =>
-      reply.status(200).send(CloudinaryService.createUploadSignature())
-  )
+  await app.register(userRoutes, { prefix: '/users' })
   await app.ready()
   return app
 }
 
-describe('POST /image-upload-signature', () => {
+describe('POST /users/image-upload-signature', () => {
   let app: FastifyInstance
 
-  const cookieFor = (userId: string) => ({
-    accessToken: app.jwt.sign({ userId, tokenType: 'access' })
-  })
-  const call = (userId?: string) =>
+  const accessFor = (userId: string) =>
+    app.jwt.sign({ userId, tokenType: 'access' })
+  const call = (
+    cookies: Record<string, string> = {},
+    remoteAddress = '10.0.0.1'
+  ) =>
     app.inject({
       method: 'POST',
-      url: '/image-upload-signature',
-      remoteAddress: '10.0.0.1',
-      cookies: userId ? cookieFor(userId) : {}
+      url: '/users/image-upload-signature',
+      remoteAddress,
+      cookies
     })
 
   beforeEach(async () => {
+    vi.stubEnv('SECRET_JWT_KEY', 'a'.repeat(40))
+    vi.stubEnv('FRONTEND_URL', 'http://localhost:5173')
     vi.stubEnv('CLOUDINARY_CLOUD_NAME', 'mycloud')
     vi.stubEnv('CLOUDINARY_API_KEY', 'key')
     vi.stubEnv('CLOUDINARY_API_SECRET', 'topsecret')
     vi.stubEnv('CLOUDINARY_UPLOAD_PRESET', 'signed_preset')
+    vi.spyOn(AuthService.prototype, 'isRefreshTokenActive').mockImplementation(
+      async token => (token === GOOD_REFRESH ? 'user-r' : null)
+    )
     app = await buildApp()
   })
 
@@ -88,8 +73,8 @@ describe('POST /image-upload-signature', () => {
     expect((await call()).statusCode).toBe(401)
   })
 
-  it('answers 200 with the signed fields, a fixed folder and no secret', async () => {
-    const response = await call('user-a')
+  it('answers 200 with the signed fields, a fixed folder, an id and no secret', async () => {
+    const response = await call({ accessToken: accessFor('user-a') })
 
     expect(response.statusCode).toBe(200)
     const body = response.json()
@@ -98,28 +83,41 @@ describe('POST /image-upload-signature', () => {
       'apiKey',
       'cloudName',
       'folder',
+      'publicId',
       'signature',
       'timestamp',
       'uploadPreset'
     ])
     expect(body.folder).toBe('images')
+    expect(body.publicId).toMatch(/^[0-9a-f-]{36}$/)
     expect(body.signature).toMatch(/^[0-9a-f]{40}$/)
     expect(response.body).not.toContain('topsecret')
   })
 
   it('limits per user, not per IP', async () => {
+    const a = { accessToken: accessFor('user-a') }
     for (let i = 0; i < 10; i++) {
-      expect((await call('user-a')).statusCode).toBe(200)
+      expect((await call(a, `10.0.0.${i + 1}`)).statusCode).toBe(200)
     }
-    expect((await call('user-a')).statusCode).toBe(429)
-    expect((await call('user-b')).statusCode).toBe(200)
+    expect((await call(a, '10.0.1.1')).statusCode).toBe(429)
+    expect(
+      (await call({ accessToken: accessFor('user-b') }, '10.0.0.1')).statusCode
+    ).toBe(200)
   })
 
-  it('answers 503 when the environment is incomplete', async () => {
+  it('limits a session renewed from the refresh cookie per user too', async () => {
+    const refreshOnly = { refreshToken: GOOD_REFRESH }
+    for (let i = 0; i < 10; i++) {
+      expect((await call(refreshOnly, `10.0.0.${i + 1}`)).statusCode).toBe(200)
+    }
+    expect((await call(refreshOnly, '10.0.2.1')).statusCode).toBe(429)
+  })
+
+  it('answers 503 with a message when the preset is not configured', async () => {
     vi.stubEnv('CLOUDINARY_UPLOAD_PRESET', '')
     vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    const response = await call('user-a')
+    const response = await call({ accessToken: accessFor('user-a') })
 
     expect(response.statusCode).toBe(503)
     expect(response.json().message).toBeTruthy()
