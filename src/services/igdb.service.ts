@@ -457,6 +457,42 @@ export class IGDBService {
     return info
   }
 
+  /** Data e `release_dates` de cada jogo, para o backfill de precisão do cache. */
+  static async getReleaseInfoWithDatesByIds(ids: number[]): Promise<
+    Map<
+      number,
+      {
+        releaseDate: number | null
+        releaseDates?: { date?: number; date_format?: number }[]
+      }
+    >
+  > {
+    const unique = [...new Set(ids)]
+    const info = new Map<
+      number,
+      {
+        releaseDate: number | null
+        releaseDates?: { date?: number; date_format?: number }[]
+      }
+    >()
+
+    for (let i = 0; i < unique.length; i += this.EXTERNAL_GAMES_BATCH_SIZE) {
+      const chunk = unique.slice(i, i + this.EXTERNAL_GAMES_BATCH_SIZE)
+      const results = await this.request<IGDBGame[]>(
+        'games',
+        `where id = (${chunk.join(',')}); fields id,first_release_date,release_dates.date,release_dates.date_format; limit ${chunk.length};`
+      )
+      for (const row of results) {
+        info.set(row.id, {
+          releaseDate: this.toCacheReleaseDate(row.first_release_date),
+          releaseDates: row.release_dates
+        })
+      }
+    }
+
+    return info
+  }
+
   static async getCoverUrlsByIds(
     ids: number[]
   ): Promise<Map<number, string | null>> {

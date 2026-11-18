@@ -895,3 +895,44 @@ describe('IGDBService queries that feed games_cache ask for the date format', ()
     ).toBe(true)
   })
 })
+
+describe('IGDBService.getReleaseInfoWithDatesByIds', () => {
+  it('asks for the date and the date format and normalizes the date like the cache', async () => {
+    const request = mockRequest([
+      {
+        id: 1,
+        first_release_date: 1798675200,
+        release_dates: [{ date: 1798675200, date_format: 2 }]
+      },
+      { id: 2 }
+    ])
+
+    const info = await IGDBService.getReleaseInfoWithDatesByIds([1, 2, 1])
+
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(String(request.mock.calls[0][1])).toContain(
+      'release_dates.date,release_dates.date_format'
+    )
+    expect(info.get(1)).toEqual({
+      releaseDate: 1798675200,
+      releaseDates: [{ date: 1798675200, date_format: 2 }]
+    })
+    expect(info.get(2)).toEqual({ releaseDate: null, releaseDates: undefined })
+  })
+})
+
+describe('IGDBService.getReleaseInfoWithDatesByIds chunks', () => {
+  it('asks IGDB for at most 500 ids at a time', async () => {
+    const request = mockRequest([])
+    const ids = Array.from({ length: 1200 }, (_, i) => i + 1)
+
+    await IGDBService.getReleaseInfoWithDatesByIds(ids)
+
+    expect(request).toHaveBeenCalledTimes(3)
+    const sizes = request.mock.calls.map(
+      ([, body]) =>
+        /where id = \(([^)]*)\)/.exec(String(body))?.[1].split(',').length
+    )
+    expect(sizes).toEqual([500, 500, 200])
+  })
+})

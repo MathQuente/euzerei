@@ -568,6 +568,84 @@ export class GameCacheRepository {
     `)
   }
 
+  async findPrecisionRowsAfter(
+    afterId: number,
+    limit: number
+  ): Promise<
+    Array<{
+      igdbId: number
+      releaseDate: number | null
+      releaseDatePrecision: string | null
+    }>
+  > {
+    return prisma.gameCache.findMany({
+      where: { igdbId: { gt: afterId }, releaseDate: { not: null } },
+      orderBy: { igdbId: 'asc' },
+      take: limit,
+      select: { igdbId: true, releaseDate: true, releaseDatePrecision: true }
+    })
+  }
+
+  async updateReleasePrecisions(
+    updates: Array<{
+      igdbId: number
+      precision: string | null
+      /** A data para a qual a precisão foi calculada. */
+      releaseDate: number
+    }>
+  ): Promise<number> {
+    if (updates.length === 0) return 0
+    const rows = JSON.stringify(
+      updates.map(u => ({
+        id: u.igdbId,
+        precision: u.precision,
+        release_date: u.releaseDate
+      }))
+    )
+    // Só grava se a data ainda é a que a precisão descreve: o backfill de datas
+    // pode ter mudado a linha enquanto este script lia a IGDB.
+    return prisma.$executeRaw(Prisma.sql`
+      UPDATE games_cache gc
+      SET release_date_precision = v.precision
+      FROM jsonb_to_recordset(${rows}::jsonb)
+        AS v(id int, precision text, release_date int)
+      WHERE gc.igdb_id = v.id
+        AND gc.release_date IS NOT DISTINCT FROM v.release_date
+        AND gc.release_date_precision IS DISTINCT FROM v.precision
+    `)
+  }
+
+  async restoreReleasePrecisions(
+    rows: Array<{
+      igdbId: number
+      previous: string | null
+      next: string | null
+    }>,
+    dryRun: boolean
+  ): Promise<number> {
+    if (rows.length === 0) return 0
+    const json = JSON.stringify(
+      rows.map(r => ({ id: r.igdbId, previous: r.previous, next: r.next }))
+    )
+    if (dryRun) {
+      const counted = await prisma.$queryRaw<{ count: bigint }[]>(Prisma.sql`
+        SELECT count(*) AS count
+        FROM games_cache gc
+        JOIN jsonb_to_recordset(${json}::jsonb) AS v(id int, previous text, next text)
+          ON gc.igdb_id = v.id
+        WHERE gc.release_date_precision IS NOT DISTINCT FROM v.next
+      `)
+      return Number(counted[0]?.count ?? 0)
+    }
+    return prisma.$executeRaw(Prisma.sql`
+      UPDATE games_cache gc
+      SET release_date_precision = v.previous
+      FROM jsonb_to_recordset(${json}::jsonb) AS v(id int, previous text, next text)
+      WHERE gc.igdb_id = v.id
+        AND gc.release_date_precision IS NOT DISTINCT FROM v.next
+    `)
+  }
+
   async findCoverCandidatesAfter(
     afterId: number,
     limit: number,

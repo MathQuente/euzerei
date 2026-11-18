@@ -387,3 +387,66 @@ describe('GameCacheRepository.upsertMany', () => {
     expect(data.map(row => row.releaseDatePrecision)).toEqual(['year', null])
   })
 })
+
+describe('GameCacheRepository release precision backfill writes', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('does not write an empty batch', async () => {
+    const execute = vi.spyOn(prisma, '$executeRaw').mockResolvedValue(0)
+
+    expect(await new GameCacheRepository().updateReleasePrecisions([])).toBe(0)
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('writes in one statement that only sets release_date_precision, where it differs and the date still matches', async () => {
+    const execute = vi.spyOn(prisma, '$executeRaw').mockResolvedValue(2)
+
+    const written = await new GameCacheRepository().updateReleasePrecisions([
+      { igdbId: 1, precision: 'year', releaseDate: 1798675200 },
+      { igdbId: 2, precision: null, releaseDate: 1795046400 }
+    ])
+
+    expect(written).toBe(2)
+    const sql = sqlOf(execute)
+    const text = sql.strings.join('?')
+    expect(text.match(/\bSET\b/g)).toHaveLength(1)
+    expect(text).toContain('SET release_date_precision = v.precision')
+    expect(text).toContain('IS DISTINCT FROM v.precision')
+    // só grava se a data ainda é a que a precisão descreve
+    expect(text).toContain(
+      'gc.release_date IS NOT DISTINCT FROM v.release_date'
+    )
+    expect(JSON.parse(String(sql.values[0]))).toEqual([
+      { id: 1, precision: 'year', release_date: 1798675200 },
+      { id: 2, precision: null, release_date: 1795046400 }
+    ])
+  })
+
+  it('restores only rows whose precision is still the one the backfill wrote', async () => {
+    const execute = vi.spyOn(prisma, '$executeRaw').mockResolvedValue(1)
+
+    await new GameCacheRepository().restoreReleasePrecisions(
+      [{ igdbId: 1, previous: null, next: 'year' }],
+      false
+    )
+
+    const text = sqlOf(execute).strings.join('?')
+    expect(text).toContain('SET release_date_precision = v.previous')
+    expect(text).toContain('IS NOT DISTINCT FROM v.next')
+  })
+
+  it('counts what would be restored in a dry run without writing', async () => {
+    const execute = vi.spyOn(prisma, '$executeRaw').mockResolvedValue(0)
+    vi.spyOn(prisma, '$queryRaw').mockResolvedValue([{ count: 3n }])
+
+    const count = await new GameCacheRepository().restoreReleasePrecisions(
+      [{ igdbId: 1, previous: null, next: 'year' }],
+      true
+    )
+
+    expect(count).toBe(3)
+    expect(execute).not.toHaveBeenCalled()
+  })
+})
