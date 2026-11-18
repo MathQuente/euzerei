@@ -14,5 +14,6 @@ src/scripts/*-spike.ts
 backfill-console-*.json
 backfill-release-dates-*.csv
 backfill-cover-urls-*.jsonl
+backfill-steam-wishlist-dates-*.jsonl
 
 src/generated

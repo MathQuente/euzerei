@@ -167,21 +167,31 @@ export class SteamApiService {
     return data.response?.games ?? []
   }
 
+  /**
+   * A Steam devolve a lista por appid crescente, não por data; `date_added`
+   * (segundos) é quando o jogo entrou na lista.
+   */
   static async getWishlist(
     steamId: string
-  ): Promise<{ appid: number }[] | null> {
+  ): Promise<{ appid: number; dateAdded?: number }[] | null> {
     const url = `https://api.steampowered.com/IWishlistService/GetWishlist/v1/?key=${this.getApiKey()}&steamid=${steamId}`
     const response = await fetchWithTimeout(url)
 
     if (!response.ok) return null
 
     const data = (await response.json()) as {
-      response?: { items?: { appid: number }[] }
+      response?: { items?: { appid: number; date_added?: unknown }[] }
     }
 
     if (!data.response?.items) return null
 
-    return data.response.items
+    return data.response.items.map(({ appid, date_added }) =>
+      typeof date_added === 'number' &&
+      Number.isFinite(date_added) &&
+      date_added > 0
+        ? { appid, dateAdded: date_added }
+        : { appid }
+    )
   }
 
   private static async fetchAchievementData(

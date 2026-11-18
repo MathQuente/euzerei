@@ -57,7 +57,8 @@ export class UserRepository {
         userId: data.userId,
         userGamesStatusId: data.statusIds,
         completedAt,
-        endless: data.endless ?? false
+        endless: data.endless ?? false,
+        createdAt: data.createdAt
       },
       select: { igdbId: true }
     })
@@ -455,7 +456,9 @@ export class UserRepository {
             : sortBy === 'hoursPlayed'
               ? Prisma.sql`COALESCE(ugst.hours_played, 0) ${direction}`
               : sortBy === 'completedAt'
-                ? Prisma.sql`COALESCE(ug.completed_at, ug.updated_at) ${direction}`
+                ? // Desejo não tem data de conclusão: cairia em updated_at, que
+                  // a importação e qualquer edição mexem. Vale a data de adição.
+                  Prisma.sql`CASE WHEN ugs.status = 'WISHLIST' THEN ug.created_at ELSE COALESCE(ug.completed_at, ug.updated_at) END ${direction}`
                 : Prisma.sql`ug.created_at ${direction}`
 
     const statusFilter = this.userGamesStatusFilter(filter)

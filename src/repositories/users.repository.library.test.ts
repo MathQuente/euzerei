@@ -144,4 +144,18 @@ describe('UserRepository.setAccountConsole', () => {
       await new UserRepository().setAccountConsole('user-1', 'x', 'XBOX', null)
     ).toBe(false)
   })
+
+  it('orders a wishlist game by when it was added even when sorting by finish date', async () => {
+    await new UserRepository().findManyGamesOfUser({
+      userId: 'user-1',
+      previewPerStatus: 8,
+      sortBy: 'completedAt',
+      sortOrder: 'desc'
+    })
+
+    const { sql } = lastQuery()
+    expect(sql).toContain(
+      "CASE WHEN ugs.status = 'WISHLIST' THEN ug.created_at ELSE COALESCE(ug.completed_at, ug.updated_at) END DESC"
+    )
+  })
 })

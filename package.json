@@ -32,6 +32,7 @@
     "backfill:category-parent": "tsx --env-file .env src/scripts/backfill-category-parent.ts",
     "backfill:console": "tsx --env-file .env src/scripts/backfill-console.ts",
     "purge:erotic": "tsx --env-file .env src/scripts/purge-erotic.ts",
+    "backfill:steam-wishlist-dates": "tsx --env-file .env src/scripts/backfill-steam-wishlist-dates.ts",
     "backfill:user-library-gaps": "tsx --env-file .env src/scripts/backfill-user-library-gaps.ts"
   },
   "keywords": [],

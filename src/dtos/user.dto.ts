@@ -10,6 +10,8 @@ export interface AddGameDTO {
   statusIds: number
   completedAt?: Date
   endless?: boolean
+  /** Só para dar ao jogo a data real em que entrou na lista de origem. */
+  createdAt?: Date
 }
 
 export interface UpdateUserDTO {

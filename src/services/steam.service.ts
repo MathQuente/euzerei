@@ -128,6 +128,26 @@ function resolveCompletedAt(
   return new Date()
 }
 
+interface WishlistItem {
+  appid: number
+  name: string
+  /** Segundos desde 1970: quando o jogo entrou na lista de desejos da Steam. */
+  dateAdded?: number
+}
+
+/** Mesmo jogo em duas contas: vale a data mais antiga. */
+export function earliestWishlistItem(
+  existing: WishlistItem | undefined,
+  incoming: WishlistItem
+): WishlistItem {
+  if (!existing) return incoming
+  if (!incoming.dateAdded) return existing
+  if (!existing.dateAdded || incoming.dateAdded < existing.dateAdded) {
+    return incoming
+  }
+  return existing
+}
+
 export class SteamService {
   constructor(
     private userRepository: UserRepository,
@@ -260,7 +280,7 @@ export class SteamService {
 
     const results: SteamAccountImportResult[] = []
     const failures: unknown[] = []
-    const wishlistByAppId = new Map<number, { appid: number; name: string }>()
+    const wishlistByAppId = new Map<number, WishlistItem>()
     const igdbByAppId = new Map<number, IGDBGame>()
 
     for (const [index, account] of accounts.entries()) {
@@ -274,7 +294,8 @@ export class SteamService {
         await this.refreshPersonaName(account)
         const imported = await this.importAccount(userId, account, report)
         for (const item of imported.wishlist) {
-          wishlistByAppId.set(item.appid, item)
+          const existing = wishlistByAppId.get(item.appid)
+          wishlistByAppId.set(item.appid, earliestWishlistItem(existing, item))
         }
         for (const [appId, game] of imported.igdbByAppId) {
           igdbByAppId.set(appId, game)
@@ -360,7 +381,7 @@ export class SteamService {
     const { steamId } = account
 
     let ownedGames: SteamOwnedGame[] | null
-    let wishlistItemsRaw: { appid: number }[] | null
+    let wishlistItemsRaw: { appid: number; dateAdded?: number }[] | null
     let recentGames: SteamOwnedGame[]
     try {
       ;[ownedGames, wishlistItemsRaw, recentGames] = await Promise.all([
@@ -390,9 +411,10 @@ export class SteamService {
 
     ownedGames = addFamilySharedGames(ownedGames, recentGames)
 
-    const wishlist = (wishlistItemsRaw ?? []).map(w => ({
+    const wishlist: WishlistItem[] = (wishlistItemsRaw ?? []).map(w => ({
       appid: w.appid,
-      name: `App ${w.appid}`
+      name: `App ${w.appid}`,
+      dateAdded: w.dateAdded
     }))
 
     const allAppIds = [
@@ -688,7 +710,7 @@ export class SteamService {
       skipped,
       notFound
     }: {
-      toImport: { item: { appid: number; name: string }; igdbGame: IGDBGame }[]
+      toImport: { item: WishlistItem; igdbGame: IGDBGame }[]
       skipped: number
       notFound: string[]
     },
@@ -697,13 +719,14 @@ export class SteamService {
   ): Promise<SteamImportSectionResult> {
     let imported = 0
 
-    for (const { igdbGame } of toImport) {
+    for (const { item, igdbGame } of toImport) {
       await this.gameCacheService.cacheMany([igdbGame])
       await this.userRepository.addGameToUserLibrary({
         igdbId: igdbGame.id,
         userId,
         statusIds: WISHLIST_STATUS_ID,
-        endless: IGDBService.suggestsEndlessForGame(igdbGame)
+        endless: IGDBService.suggestsEndlessForGame(igdbGame),
+        ...(item.dateAdded && { createdAt: new Date(item.dateAdded * 1000) })
       })
       await this.userRepository.createUserGameStats(userId, igdbGame.id, 0)
       imported++

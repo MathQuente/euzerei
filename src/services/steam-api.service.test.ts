@@ -419,3 +419,55 @@ describe('SteamApiService.getRecentlyPlayedGames', () => {
     ).rejects.toBeInstanceOf(SteamApiError)
   })
 })
+
+describe('SteamApiService.getWishlist', () => {
+  function mockWishlist(body: unknown, ok = true) {
+    vi.stubEnv('STEAM_API_KEY', 'key')
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok, json: () => Promise.resolve(body) })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('keeps the date each game was added, in the order Steam sent', async () => {
+    mockWishlist({
+      response: {
+        items: [
+          { appid: 10, priority: 0, date_added: 1792465417 },
+          { appid: 20, priority: 3, date_added: 1707323361 }
+        ]
+      }
+    })
+
+    expect(await SteamApiService.getWishlist('1')).toEqual([
+      { appid: 10, dateAdded: 1792465417 },
+      { appid: 20, dateAdded: 1707323361 }
+    ])
+  })
+
+  it('drops a missing or invalid date instead of inventing one', async () => {
+    mockWishlist({
+      response: {
+        items: [
+          { appid: 1 },
+          { appid: 2, date_added: 0 },
+          { appid: 3, date_added: 'ontem' }
+        ]
+      }
+    })
+
+    expect(await SteamApiService.getWishlist('1')).toEqual([
+      { appid: 1 },
+      { appid: 2 },
+      { appid: 3 }
+    ])
+  })
+
+  it('returns null when Steam answers with an error or no items', async () => {
+    mockWishlist({}, false)
+    expect(await SteamApiService.getWishlist('1')).toBeNull()
+    mockWishlist({ response: {} })
+    expect(await SteamApiService.getWishlist('1')).toBeNull()
+  })
+})

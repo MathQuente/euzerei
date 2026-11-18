@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { Prisma } from '../database/prisma-client'
-import { SteamService, addFamilySharedGames } from './steam.service'
+import {
+  SteamService,
+  addFamilySharedGames,
+  earliestWishlistItem
+} from './steam.service'
 import { SteamApiError, SteamApiService } from './steam-api.service'
 import { IGDBService } from './igdb.service'
 import { UserRepository } from '../repositories/users.repository'
@@ -1637,6 +1641,42 @@ describe('SteamService.runImport', () => {
     expect(lastPlatformRepository.savePlatform).not.toHaveBeenCalled()
   })
 
+  it('gives each wishlist game the date it was added on Steam, whatever order Steam sends', async () => {
+    const userRepository = fakeUserRepository({
+      findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+      findUserGame: vi.fn().mockResolvedValue(null),
+      addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
+      createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
+    })
+
+    vi.spyOn(SteamApiService, 'getOwnedGames').mockResolvedValue([])
+    vi.spyOn(SteamApiService, 'getWishlist').mockResolvedValue([
+      { appid: 100, dateAdded: 1_700_000_000 },
+      { appid: 200 },
+      { appid: 300, dateAdded: 1_790_000_000 }
+    ])
+    vi.spyOn(IGDBService, 'getGamesBySteamAppIds').mockResolvedValue([
+      { appId: 100, game: { id: 11, name: 'Velho' } },
+      { appId: 200, game: { id: 12, name: 'Sem data' } },
+      { appId: 300, game: { id: 13, name: 'Novo' } }
+    ] as never)
+
+    const service = new SteamService(
+      userRepository,
+      fakeGameCacheService(),
+      platformServiceFor(userRepository)
+    )
+
+    await service.runImport('user-1')
+
+    const calls = vi.mocked(userRepository.addGameToUserLibrary).mock.calls
+    const byGame = new Map(calls.map(([dto]) => [dto.igdbId, dto]))
+    expect(byGame.get(11)?.createdAt).toEqual(new Date(1_700_000_000 * 1000))
+    expect(byGame.get(13)?.createdAt).toEqual(new Date(1_790_000_000 * 1000))
+    expect(byGame.get(12)).not.toHaveProperty('createdAt')
+  })
+
   it('skips a wishlist item already present in the library under another status', async () => {
     const userRepository = fakeUserRepository({
       findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
@@ -2309,5 +2349,20 @@ describe('SteamService.runImport with family shared games', () => {
 
       expect(mark).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('earliestWishlistItem', () => {
+  const item = (dateAdded?: number) => ({ appid: 1, name: 'App 1', dateAdded })
+
+  it('keeps the earliest date when two accounts wishlist the same game', () => {
+    expect(earliestWishlistItem(item(200), item(100)).dateAdded).toBe(100)
+    expect(earliestWishlistItem(item(100), item(200)).dateAdded).toBe(100)
+  })
+
+  it('prefers a known date over a missing one', () => {
+    expect(earliestWishlistItem(item(), item(100)).dateAdded).toBe(100)
+    expect(earliestWishlistItem(item(100), item()).dateAdded).toBe(100)
+    expect(earliestWishlistItem(undefined, item(100)).dateAdded).toBe(100)
   })
 })
