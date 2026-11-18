@@ -58,14 +58,15 @@ function platformServiceFor(userRepository: UserRepository) {
 beforeEach(() => {
   vi.spyOn(SteamApiService, 'getAchievementSchema').mockResolvedValue(null)
   vi.spyOn(SteamApiService, 'getPersonaName').mockResolvedValue(null)
+  vi.spyOn(SteamApiService, 'getWishlist').mockResolvedValue([])
+  vi.spyOn(SteamApiService, 'getUnlockedAchievementTexts').mockResolvedValue(
+    null
+  )
+  vi.spyOn(SteamApiService, 'getRecentlyPlayedGames').mockResolvedValue([])
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
-})
-
-beforeEach(() => {
-  vi.spyOn(SteamApiService, 'getRecentlyPlayedGames').mockResolvedValue([])
 })
 
 describe('SteamService.connectSteam', () => {
@@ -266,7 +267,6 @@ let communityTextsSpy: ReturnType<typeof vi.spyOn>
 
 describe('SteamService.runImport', () => {
   beforeEach(() => {
-    vi.spyOn(SteamApiService, 'getWishlist').mockResolvedValue([])
     vi.spyOn(IGDBService, 'getTimeToBeatByGameIds').mockResolvedValue(new Map())
   })
 

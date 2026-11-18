@@ -595,6 +595,10 @@ describe('IGDBService game type (replaces the retired category)', () => {
     ['getComingSoonGames', () => IGDBService.getComingSoonGames(20, 0)]
   ])('%s requests game_type in the fields', async (_name, call) => {
     const request = mockRequest([])
+    vi.spyOn(
+      IGDBService as unknown as { countRequest: () => Promise<number> },
+      'countRequest'
+    ).mockResolvedValue(0)
 
     await call()
 

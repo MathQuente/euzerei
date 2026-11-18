@@ -109,7 +109,7 @@ docs/
   CODEBASE_MAP.md  this file
 ```
 
-Tests live next to the code as `*.test.ts` (Vitest, 18 files). Services are tested with hand-written fakes of the repositories; there are no repository or HTTP-level tests.
+Tests live next to the code as `*.test.ts` (Vitest). Services are tested with hand-written fakes of the repositories; some repository and route tests mock Prisma or build a Fastify app. `vitest.setup.ts` blocks real `fetch` (see the Steam section).
 
 ## Prisma Schema
 
@@ -487,7 +487,7 @@ Reasons that are not visible in the code. The code has no explanatory comments; 
 
 - `GetOwnedGames` (the list the import was built on) does not include games borrowed through Steam Family Sharing: the license is not the account's. `SteamApiService.getRecentlyPlayedGames` (`IPlayerService/GetRecentlyPlayedGames/v1`) does list them, but only what was played in the **last 2 weeks**. There is no supported way to list the whole family library: `IFamilyGroupsService/GetSharedLibraryApps` is undocumented and does not take the Web API key, only a session cookie.
 - `SteamService.importAccount` fetches the recently played list in parallel with the owned games and the wishlist and merges it with `addFamilySharedGames(owned, recent)`: a game that is not in the owned list is added with `rtime_last_played = now` (the endpoint has no such field, and being on that list means it was played lately), and the owned data wins for a game that is on both. Everything after that is the usual flow (IGDB by appid, achievements, time to beat, completion suggestions): a borrowed game enters as `PLAYING`, or as played only when the existing signals say so (a few unlocked achievements are not a finish).
-- The recently played call is a complement: if it fails (any error, even a missing `STEAM_API_KEY`) it is logged with `logError` and the import goes on with the owned games. `steam.service.test.ts` mocks it to `[]` for every test by default, so the suite never calls the real Steam (`vitest.setup.ts` loads the real `.env`).
+- The recently played call is a complement: if it fails (any error, even a missing `STEAM_API_KEY`) it is logged with `logError` and the import goes on with the owned games. `steam.service.test.ts` mocks it to `[]` for every test by default, so the suite never calls the real Steam (`vitest.setup.ts` loads the real `.env`, so it also replaces `globalThis.fetch` with a guard that throws `Rede real bloqueada nos testes: <host/path> em <arquivo> > <teste>`; mock the service method or `vi.stubGlobal('fetch', ...)`; the guard covers `fetch` only, not Prisma or Redis).
 
 ## Sign-in providers: link and unlink (Google, Discord)
 
