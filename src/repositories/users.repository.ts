@@ -378,6 +378,12 @@ export class UserRepository {
         : Prisma.empty
   }
 
+  private userGamesExcludeFilter(excludeStatuses?: Status[]) {
+    return excludeStatuses?.length
+      ? Prisma.sql`AND ugs.status::text NOT IN (${Prisma.join(excludeStatuses)})`
+      : Prisma.empty
+  }
+
   private userGamesPlatformFilter(platforms?: Platform[]) {
     return platforms?.length
       ? Prisma.sql`AND EXISTS (
@@ -396,12 +402,14 @@ export class UserRepository {
     userId,
     filter,
     query,
-    platforms
+    platforms,
+    excludeStatuses
   }: {
     userId: string
     filter?: Status | typeof QUEUE_FILTER
     query?: string
     platforms?: Platform[]
+    excludeStatuses?: Status[]
   }): Promise<number> {
     const rows = await prisma.$queryRaw<{ total: bigint }[]>(Prisma.sql`
       SELECT COUNT(*)::bigint AS total
@@ -410,6 +418,7 @@ export class UserRepository {
       LEFT JOIN games_cache gc ON gc.igdb_id = ug.igdb_id
       WHERE ug.user_id = ${userId}
       ${this.userGamesStatusFilter(filter)}
+      ${this.userGamesExcludeFilter(excludeStatuses)}
       ${this.userGamesQueryFilter(query)}
       ${this.userGamesPlatformFilter(platforms)}
     `)
@@ -421,6 +430,7 @@ export class UserRepository {
     filter,
     query,
     platforms,
+    excludeStatuses,
     sortBy,
     sortOrder = 'asc',
     skip,
@@ -434,6 +444,7 @@ export class UserRepository {
     filter?: Status | typeof QUEUE_FILTER
     query?: string
     platforms?: Platform[]
+    excludeStatuses?: Status[]
     sortBy?: UserGameSortBy
     sortOrder?: UserGameSortOrder
     skip?: number
@@ -464,6 +475,7 @@ export class UserRepository {
     const statusFilter = this.userGamesStatusFilter(filter)
     const queryFilter = this.userGamesQueryFilter(query)
     const platformFilter = this.userGamesPlatformFilter(platforms)
+    const statusExcludeFilter = this.userGamesExcludeFilter(excludeStatuses)
     const excludeFilter =
       excludeIgdbId !== undefined
         ? Prisma.sql`AND ug.igdb_id <> ${excludeIgdbId}`
@@ -511,6 +523,7 @@ export class UserRepository {
       LEFT JOIN user_game_stats ugst ON ugst.user_game_id = ug.id
       WHERE ug.user_id = ${userId}
       ${statusFilter}
+      ${statusExcludeFilter}
       ${queryFilter}
       ${platformFilter}
       ${excludeFilter}

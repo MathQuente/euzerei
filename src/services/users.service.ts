@@ -488,11 +488,13 @@ export class UserService {
       previewPerStatus?: number
       includeLibraryIds?: boolean
       platforms?: Platform[]
+      excludeStatuses?: Status[]
     } = {}
   ) {
     await this.requireUser(userId)
 
     const platforms = options.platforms?.length ? options.platforms : undefined
+    const { excludeStatuses } = options
     const isOverview = !filter && !query && !platforms
     const previewPerStatus = isOverview
       ? (options.previewPerStatus ?? this.LIBRARY_PREVIEW_PER_STATUS)
@@ -503,6 +505,7 @@ export class UserService {
       filter,
       query,
       platforms,
+      excludeStatuses,
       sortBy,
       sortOrder,
       skip: filter ? pageIndex * this.USER_GAMES_PER_PAGE : undefined,
@@ -542,15 +545,18 @@ export class UserService {
             userId,
             filter,
             query,
-            platforms
+            platforms,
+            excludeStatuses
           })
         : undefined
     ])
 
-    const totalPerStatusMapped = totalPerStatus.map(item => ({
-      status: item.status,
-      totalGames: item._count.userGames
-    }))
+    const totalPerStatusMapped = totalPerStatus
+      .filter(item => !excludeStatuses?.includes(item.status))
+      .map(item => ({
+        status: item.status,
+        totalGames: item._count.userGames
+      }))
 
     const countOf = (status: string) =>
       totalPerStatusMapped.find(t => t.status === status)?.totalGames ?? 0
@@ -582,7 +588,9 @@ export class UserService {
       'desc',
       {
         previewPerStatus: this.PUBLIC_PROFILE_PREVIEW_PER_STATUS,
-        includeLibraryIds: false
+        includeLibraryIds: false,
+        // Largados só aparecem para o dono: a interface pública já os esconde.
+        excludeStatuses: [Status.DROPPED]
       }
     )
   }

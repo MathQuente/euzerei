@@ -133,3 +133,58 @@ describe('UserController.deleteUser', () => {
     expect(reply.clearCookie).not.toHaveBeenCalled()
   })
 })
+
+describe('UserController.getAllUserGames', () => {
+  function ownerRequest(query: Record<string, string>) {
+    return {
+      query,
+      user: { userId: 'user-1' },
+      headers: {}
+    } as unknown as FastifyRequest
+  }
+
+  it('hands the platform filter to the service and never hides statuses from the owner', async () => {
+    const findManyUserGames = vi.fn().mockResolvedValue({
+      games: {},
+      totalPerStatus: [],
+      total: 0
+    })
+    const controller = new UserController({
+      findManyUserGames
+    } as unknown as UserService)
+
+    await controller.getAllUserGames(
+      ownerRequest({ filter: 'QUEUE', platforms: 'PLAYSTATION,XBOX' }),
+      fakeReply()
+    )
+
+    const options = findManyUserGames.mock.calls[0][6]
+    expect(options).toEqual({ platforms: ['PLAYSTATION', 'XBOX'] })
+    expect(options).not.toHaveProperty('excludeStatuses')
+  })
+})
+
+describe('UserController.getPublicUserGames', () => {
+  it('uses the public method, which is the one that leaves dropped games out', async () => {
+    const findPublicUserGames = vi.fn().mockResolvedValue({
+      games: { DROPPED: [] },
+      totalPerStatus: [],
+      total: 0
+    })
+    const findManyUserGames = vi.fn()
+    const controller = new UserController({
+      findPublicUserGames,
+      findManyUserGames
+    } as unknown as UserService)
+
+    await controller.getPublicUserGames(
+      {
+        params: { userId: '3f1c2e0a-9b4d-4c61-8a57-2d0f7a1b9e44' }
+      } as unknown as FastifyRequest,
+      fakeReply()
+    )
+
+    expect(findPublicUserGames).toHaveBeenCalledTimes(1)
+    expect(findManyUserGames).not.toHaveBeenCalled()
+  })
+})
