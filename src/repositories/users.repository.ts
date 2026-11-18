@@ -369,6 +369,39 @@ export class UserRepository {
     }))
   }
 
+  private userGamesStatusFilter(filter?: Status | typeof QUEUE_FILTER) {
+    return filter === QUEUE_FILTER
+      ? Prisma.sql`AND ugs.status::text IN (${Prisma.join(QUEUE_STATUSES)})`
+      : filter
+        ? Prisma.sql`AND ugs.status = ${filter}::"Status"`
+        : Prisma.empty
+  }
+
+  private userGamesQueryFilter(query?: string) {
+    return query ? Prisma.sql`AND gc.name ILIKE ${`%${query}%`}` : Prisma.empty
+  }
+
+  async countGamesOfUser({
+    userId,
+    filter,
+    query
+  }: {
+    userId: string
+    filter?: Status | typeof QUEUE_FILTER
+    query?: string
+  }): Promise<number> {
+    const rows = await prisma.$queryRaw<{ total: bigint }[]>(Prisma.sql`
+      SELECT COUNT(*)::bigint AS total
+      FROM user_games ug
+      JOIN users_games_status ugs ON ugs.id = ug.user_games_status_id
+      LEFT JOIN games_cache gc ON gc.igdb_id = ug.igdb_id
+      WHERE ug.user_id = ${userId}
+      ${this.userGamesStatusFilter(filter)}
+      ${this.userGamesQueryFilter(query)}
+    `)
+    return Number(rows[0]?.total ?? 0)
+  }
+
   async findManyGamesOfUser({
     userId,
     filter,
@@ -405,16 +438,8 @@ export class UserRepository {
                 ? Prisma.sql`COALESCE(ug.completed_at, ug.updated_at) ${direction}`
                 : Prisma.sql`ug.created_at ${direction}`
 
-    const statusFilter =
-      filter === QUEUE_FILTER
-        ? Prisma.sql`AND ugs.status::text IN (${Prisma.join(QUEUE_STATUSES)})`
-        : filter
-          ? Prisma.sql`AND ugs.status = ${filter}::"Status"`
-          : Prisma.empty
-
-    const queryFilter = query
-      ? Prisma.sql`AND gc.name ILIKE ${`%${query}%`}`
-      : Prisma.empty
+    const statusFilter = this.userGamesStatusFilter(filter)
+    const queryFilter = this.userGamesQueryFilter(query)
 
     const limitClause =
       take !== undefined

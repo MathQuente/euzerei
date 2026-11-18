@@ -606,6 +606,67 @@ describe('UserService.findManyUserGames', () => {
     expect(dropped.total).toBe(5)
   })
 
+  it('counts only the games matching the search when there is a query', async () => {
+    const countGamesOfUser = vi.fn().mockResolvedValue(3)
+    const service = new UserService(
+      fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findManyGamesOfUser: vi.fn().mockResolvedValue([]),
+        findGamesCountByStatus: vi
+          .fn()
+          .mockResolvedValue(statusCounts({ BACKLOG: 30, DROPPED: 5 })),
+        countGamesOfUser
+      }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+
+    const result = await service.findManyUserGames(
+      'user-1',
+      0,
+      'QUEUE',
+      'zelda'
+    )
+
+    expect(countGamesOfUser).toHaveBeenCalledWith({
+      userId: 'user-1',
+      filter: 'QUEUE',
+      query: 'zelda'
+    })
+    expect(result.total).toBe(3)
+    expect(
+      result.totalPerStatus.find(t => t.status === 'BACKLOG')?.totalGames
+    ).toBe(30)
+  })
+
+  it('does not count by search when there is no query', async () => {
+    const countGamesOfUser = vi.fn()
+    const service = new UserService(
+      fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findManyGamesOfUser: vi.fn().mockResolvedValue([]),
+        findGamesCountByStatus: vi
+          .fn()
+          .mockResolvedValue(statusCounts({ PLAYED: 7 })),
+        countGamesOfUser
+      }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+
+    const result = await service.findManyUserGames(
+      'user-1',
+      0,
+      'PLAYED',
+      undefined
+    )
+
+    expect(countGamesOfUser).not.toHaveBeenCalled()
+    expect(result.total).toBe(7)
+  })
+
   it('sends the last-change date of each game as an ISO string', async () => {
     const row = {
       igdbId: 7,
@@ -839,6 +900,7 @@ describe('UserService.findManyUserGames overview', () => {
         .fn()
         .mockResolvedValue(statusCounts({ PLAYED: 40, BACKLOG: 266 })),
       findLibraryIgdbIds: vi.fn().mockResolvedValue([1, 2, 3]),
+      countGamesOfUser: vi.fn().mockResolvedValue(0),
       ...overrides
     })
     const service = new UserService(

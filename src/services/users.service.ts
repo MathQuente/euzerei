@@ -499,10 +499,13 @@ export class UserService {
     }
 
     const includeLibraryIds = isOverview && (options.includeLibraryIds ?? true)
-    const [totalPerStatus, libraryIgdbIds] = await Promise.all([
+    const [totalPerStatus, libraryIgdbIds, matchingTotal] = await Promise.all([
       this.userRepository.findGamesCountByStatus(userId),
       includeLibraryIds
         ? this.userRepository.findLibraryIgdbIds(userId)
+        : undefined,
+      query
+        ? this.userRepository.countGamesOfUser({ userId, filter, query })
         : undefined
     ])
 
@@ -514,11 +517,12 @@ export class UserService {
     const countOf = (status: string) =>
       totalPerStatusMapped.find(t => t.status === status)?.totalGames ?? 0
     const total =
-      filter === QUEUE_FILTER
+      matchingTotal ??
+      (filter === QUEUE_FILTER
         ? countOf(Status.BACKLOG) + countOf(Status.DROPPED)
         : filter
           ? countOf(filter)
-          : totalPerStatusMapped.reduce((acc, t) => acc + t.totalGames, 0)
+          : totalPerStatusMapped.reduce((acc, t) => acc + t.totalGames, 0))
 
     return {
       games,
