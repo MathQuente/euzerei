@@ -10,8 +10,10 @@ import {
 } from '../types/user'
 import {
   CLEAR_HUNDRED_PERCENT,
+  DROPPED_STATUS_ID,
   PLAYED_STATUS_ID,
-  WISHLIST_STATUS_ID
+  WISHLIST_STATUS_ID,
+  droppedAtFor
 } from '../utils/library-status'
 
 const NOT_WISHLIST = {
@@ -57,6 +59,7 @@ export class UserRepository {
         userId: data.userId,
         userGamesStatusId: data.statusIds,
         completedAt,
+        droppedAt: droppedAtFor(data.statusIds, null),
         endless: data.endless ?? false,
         createdAt: data.createdAt
       },
@@ -328,6 +331,7 @@ export class UserRepository {
       select: {
         endless: true,
         hundredPercent: true,
+        droppedAt: true,
         UserGamesStatus: { select: { id: true, status: true } },
         UserGameStats: { select: { completions: true, hoursPlayed: true } },
         _count: { select: { platforms: true } }
@@ -470,7 +474,10 @@ export class UserRepository {
                 ? // Desejo não tem data de conclusão: cairia em updated_at, que
                   // a importação e qualquer edição mexem. Vale a data de adição.
                   Prisma.sql`CASE WHEN ugs.status = 'WISHLIST' THEN ug.created_at ELSE COALESCE(ug.completed_at, ug.updated_at) END ${direction}`
-                : Prisma.sql`ug.created_at ${direction}`
+                : sortBy === 'droppedAt'
+                  ? // Jogo que não está em Larguei não tem a data: vale a de adição.
+                    Prisma.sql`CASE WHEN ugs.status = 'DROPPED' THEN COALESCE(ug.dropped_at, ug.updated_at) ELSE ug.created_at END ${direction}`
+                  : Prisma.sql`ug.created_at ${direction}`
 
     const statusFilter = this.userGamesStatusFilter(filter)
     const queryFilter = this.userGamesQueryFilter(query)
@@ -499,6 +506,7 @@ export class UserRepository {
         ug.endless                    AS "endless",
         ug.hundred_percent            AS "hundredPercent",
         ug.updated_at                 AS "updatedAt",
+        ug.dropped_at                 AS "droppedAt",
         gc.name                       AS "name",
         gc.slug                       AS "slug",
         gc.cover_url                  AS "coverUrl",
@@ -543,7 +551,7 @@ export class UserRepository {
     return prisma.$queryRaw<PaginatedUserGameRow[]>(Prisma.sql`
       SELECT
         ranked."igdbId", ranked."status", ranked."endless", ranked."hundredPercent",
-        ranked."updatedAt",
+        ranked."updatedAt", ranked."droppedAt",
         ranked."name",
         ranked."slug", ranked."coverUrl", ranked."platforms", ranked."releaseDate",
         ranked."rating", ranked."completions", ranked."hoursPlayed",
@@ -723,10 +731,18 @@ export class UserRepository {
     statusId: number,
     options: { endless?: boolean } = {}
   ) {
+    const current =
+      statusId === DROPPED_STATUS_ID
+        ? await prisma.userGame.findUnique({
+            where: { userId_igdbId: { igdbId, userId } },
+            select: { userGamesStatusId: true }
+          })
+        : null
     return prisma.userGame.update({
       where: { userId_igdbId: { igdbId, userId } },
       data: {
         userGamesStatusId: statusId,
+        droppedAt: droppedAtFor(statusId, current?.userGamesStatusId ?? null),
         endless: options.endless,
         ...(statusId === PLAYED_STATUS_ID ? {} : CLEAR_HUNDRED_PERCENT),
         updatedAt: new Date(),

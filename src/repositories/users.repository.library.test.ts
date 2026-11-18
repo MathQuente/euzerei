@@ -2,7 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const prismaMock = vi.hoisted(() => ({
   $queryRaw: vi.fn(),
-  userGame: { findMany: vi.fn() }
+  userGame: {
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+    update: vi.fn(),
+    create: vi.fn()
+  }
 }))
 
 vi.mock('../database/db', () => ({ prisma: prismaMock }))
@@ -157,5 +162,93 @@ describe('UserRepository.setAccountConsole', () => {
     expect(sql).toContain(
       "CASE WHEN ugs.status = 'WISHLIST' THEN ug.created_at ELSE COALESCE(ug.completed_at, ug.updated_at) END DESC"
     )
+  })
+})
+
+describe('UserRepository sort by dropped date', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    prismaMock.$queryRaw.mockResolvedValue([])
+  })
+
+  it('orders by when the game was dropped, falling back to the last edit and to the added date', async () => {
+    await new UserRepository().findManyGamesOfUser({
+      userId: 'user-1',
+      previewPerStatus: 8,
+      sortBy: 'droppedAt',
+      sortOrder: 'desc'
+    })
+
+    expect(lastQuery().sql).toContain(
+      "CASE WHEN ugs.status = 'DROPPED' THEN COALESCE(ug.dropped_at, ug.updated_at) ELSE ug.created_at END DESC"
+    )
+  })
+})
+
+describe('UserRepository dropped date', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    prismaMock.$queryRaw.mockResolvedValue([])
+    prismaMock.userGame.update.mockResolvedValue({ igdbId: 1 })
+    prismaMock.userGame.create.mockResolvedValue({ igdbId: 1 })
+  })
+
+  it('selects the dropped date in the list, also through the ranked preview', async () => {
+    await new UserRepository().findManyGamesOfUser({
+      userId: 'user-1',
+      previewPerStatus: 24
+    })
+
+    const { sql } = lastQuery()
+    expect(sql).toContain('ug.dropped_at')
+    expect(sql).toContain('ranked."droppedAt"')
+  })
+
+  it('stamps the date when a game moves into Larguei', async () => {
+    prismaMock.userGame.findUnique.mockResolvedValue({ userGamesStatusId: 3 })
+
+    await new UserRepository().updateGameStatus(1, 'user-1', 6)
+
+    const data = prismaMock.userGame.update.mock.calls[0][0].data
+    expect(data.droppedAt).toBeInstanceOf(Date)
+  })
+
+  it('keeps the old date when the game is already in Larguei', async () => {
+    prismaMock.userGame.findUnique.mockResolvedValue({ userGamesStatusId: 6 })
+
+    await new UserRepository().updateGameStatus(1, 'user-1', 6)
+
+    const data = prismaMock.userGame.update.mock.calls[0][0].data
+    expect(data.droppedAt).toBeUndefined()
+  })
+
+  it('does not read the game or touch the date for a status other than Larguei', async () => {
+    await new UserRepository().updateGameStatus(1, 'user-1', 3)
+
+    expect(prismaMock.userGame.findUnique).not.toHaveBeenCalled()
+    expect(
+      prismaMock.userGame.update.mock.calls[0][0].data.droppedAt
+    ).toBeUndefined()
+  })
+
+  it('stamps the date on a game created already dropped, and only then', async () => {
+    const repository = new UserRepository()
+
+    await repository.addGameToUserLibrary({
+      igdbId: 1,
+      userId: 'user-1',
+      statusIds: 6
+    })
+    await repository.addGameToUserLibrary({
+      igdbId: 2,
+      userId: 'user-1',
+      statusIds: 4
+    })
+
+    const [dropped, backlog] = prismaMock.userGame.create.mock.calls.map(
+      call => call[0].data
+    )
+    expect(dropped.droppedAt).toBeInstanceOf(Date)
+    expect(backlog.droppedAt).toBeUndefined()
   })
 })

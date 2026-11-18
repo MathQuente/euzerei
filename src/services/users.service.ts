@@ -313,7 +313,12 @@ export class UserService {
       endless: userGameStatus?.endless ?? false,
       hundredPercent: userGameStatus?.hundredPercent ?? false,
       hoursPlayed: Number(userGameStatus?.UserGameStats?.hoursPlayed ?? 0),
-      completions: userGameStatus?.UserGameStats?.completions ?? 0
+      completions: userGameStatus?.UserGameStats?.completions ?? 0,
+      // Só vale enquanto o jogo está em Larguei (a coluna nunca é apagada).
+      droppedAt:
+        userGameStatus?.UserGamesStatus?.status === Status.DROPPED
+          ? userGameStatus.droppedAt?.toISOString()
+          : undefined
     }
   }
 
@@ -479,9 +484,11 @@ export class UserService {
       | 'rating'
       | 'dateAdded'
       | 'hoursPlayed'
-      | 'completedAt' = 'dateAdded',
+      | 'completedAt'
+      | 'droppedAt' = 'dateAdded',
     sortOrder: 'asc' | 'desc' = sortBy === 'dateAdded' ||
-    sortBy === 'completedAt'
+    sortBy === 'completedAt' ||
+    sortBy === 'droppedAt'
       ? 'desc'
       : 'asc',
     options: {
@@ -618,6 +625,10 @@ export class UserService {
         : []
     const fetchedMap = new Map(fetched.map(g => [g.id, g]))
 
+    // Só vale enquanto o jogo está em Larguei (a coluna nunca é apagada).
+    const droppedAtOf = (r: R) =>
+      r.status === Status.DROPPED ? r.droppedAt?.toISOString() : undefined
+
     if (fetched.length > 0) {
       this.gameCacheService
         .cacheMany(fetched)
@@ -641,7 +652,8 @@ export class UserService {
             status: r.status as R['status'],
             endless: r.endless,
             hundredPercent: r.hundredPercent,
-            updatedAt: r.updatedAt?.toISOString()
+            updatedAt: r.updatedAt?.toISOString(),
+            droppedAt: droppedAtOf(r)
           }
         }
 
@@ -662,7 +674,8 @@ export class UserService {
           status: r.status as R['status'],
           endless: r.endless,
           hundredPercent: r.hundredPercent,
-          updatedAt: r.updatedAt?.toISOString()
+          updatedAt: r.updatedAt?.toISOString(),
+          droppedAt: droppedAtOf(r)
         }
       })
       .filter((g): g is NonNullable<typeof g> => g !== null)

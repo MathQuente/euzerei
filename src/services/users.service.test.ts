@@ -191,6 +191,26 @@ describe('UserService.findUserGameStatus', () => {
     })
   })
 
+  it('sends the dropped date only while the game is in Larguei', async () => {
+    const droppedAt = new Date('2026-11-15T04:06:06.275Z')
+    const base = { endless: false, hundredPercent: false, UserGameStats: null }
+
+    await expect(
+      build({
+        ...base,
+        droppedAt,
+        UserGamesStatus: { id: 6, status: 'DROPPED' }
+      }).findUserGameStatus(7, 'user-1')
+    ).resolves.toMatchObject({ droppedAt: '2026-11-15T04:06:06.275Z' })
+
+    const playing = await build({
+      ...base,
+      droppedAt,
+      UserGamesStatus: { id: 3, status: 'PLAYING' }
+    }).findUserGameStatus(7, 'user-1')
+    expect(playing.droppedAt).toBeUndefined()
+  })
+
   it('returns null status and zero totals when the game is not in the library', async () => {
     const service = build(null)
 
@@ -1086,6 +1106,53 @@ describe('UserService.findManyUserGames overview', () => {
 
     expect(getGamesByIds).toHaveBeenCalledWith([7])
     getGamesByIds.mockRestore()
+  })
+})
+
+describe('UserService dropped date in the list', () => {
+  const row = (igdbId: number, status: string) => ({
+    igdbId,
+    status,
+    name: `Game ${igdbId}`,
+    slug: `game-${igdbId}`,
+    coverUrl: null,
+    platforms: null,
+    releaseDate: null,
+    rating: null,
+    completions: 0,
+    hoursPlayed: 0,
+    playedOn: [],
+    endless: false,
+    hundredPercent: false,
+    updatedAt: new Date('2026-11-10T00:00:00.000Z'),
+    droppedAt: new Date('2026-09-01T00:00:00.000Z')
+  })
+
+  it('sends the dropped date only for games that are in Larguei now', async () => {
+    const service = new UserService(
+      fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findManyGamesOfUser: vi
+          .fn()
+          .mockResolvedValue([row(1, 'DROPPED'), row(2, 'BACKLOG')]),
+        findGamesCountByStatus: vi
+          .fn()
+          .mockResolvedValue(statusCounts({ DROPPED: 1, BACKLOG: 1 }))
+      }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+
+    const { games } = await service.findManyUserGames(
+      'user-1',
+      0,
+      undefined,
+      undefined
+    )
+
+    expect(games.DROPPED[0].droppedAt).toBe('2026-09-01T00:00:00.000Z')
+    expect(games.BACKLOG[0].droppedAt).toBeUndefined()
   })
 })
 

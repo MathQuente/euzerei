@@ -5,6 +5,21 @@ export const BACKLOG_STATUS_ID = 4
 export const WISHLIST_STATUS_ID = 5
 export const DROPPED_STATUS_ID = 6
 
+/**
+ * `droppedAt` guarda a última vez que o jogo entrou em Larguei. Só é gravada na
+ * entrada (de outro status, ou ao criar já largado); nunca é apagada, e quem
+ * lê só deve usá-la enquanto o status for Larguei. `undefined` = não mexer.
+ */
+export function droppedAtFor(
+  nextStatusId: number,
+  currentStatusId: number | null,
+  now: Date = new Date()
+): Date | undefined {
+  if (nextStatusId !== DROPPED_STATUS_ID) return undefined
+  if (currentStatusId === DROPPED_STATUS_ID) return undefined
+  return now
+}
+
 export const ENDLESS_COMPLETIONS_MESSAGE =
   'Jogo infinito não conta vezes zerado.'
 
