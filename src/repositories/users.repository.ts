@@ -377,6 +377,16 @@ export class UserRepository {
         : Prisma.empty
   }
 
+  private userGamesPlatformFilter(platforms?: Platform[]) {
+    return platforms?.length
+      ? Prisma.sql`AND EXISTS (
+          SELECT 1 FROM user_game_platforms ugp
+          WHERE ugp.user_game_id = ug.id
+            AND ugp.platform::text IN (${Prisma.join(platforms)})
+        )`
+      : Prisma.empty
+  }
+
   private userGamesQueryFilter(query?: string) {
     return query ? Prisma.sql`AND gc.name ILIKE ${`%${query}%`}` : Prisma.empty
   }
@@ -384,11 +394,13 @@ export class UserRepository {
   async countGamesOfUser({
     userId,
     filter,
-    query
+    query,
+    platforms
   }: {
     userId: string
     filter?: Status | typeof QUEUE_FILTER
     query?: string
+    platforms?: Platform[]
   }): Promise<number> {
     const rows = await prisma.$queryRaw<{ total: bigint }[]>(Prisma.sql`
       SELECT COUNT(*)::bigint AS total
@@ -398,6 +410,7 @@ export class UserRepository {
       WHERE ug.user_id = ${userId}
       ${this.userGamesStatusFilter(filter)}
       ${this.userGamesQueryFilter(query)}
+      ${this.userGamesPlatformFilter(platforms)}
     `)
     return Number(rows[0]?.total ?? 0)
   }
@@ -406,6 +419,7 @@ export class UserRepository {
     userId,
     filter,
     query,
+    platforms,
     sortBy,
     sortOrder = 'asc',
     skip,
@@ -418,6 +432,7 @@ export class UserRepository {
     userId: string
     filter?: Status | typeof QUEUE_FILTER
     query?: string
+    platforms?: Platform[]
     sortBy?: UserGameSortBy
     sortOrder?: UserGameSortOrder
     skip?: number
@@ -445,6 +460,7 @@ export class UserRepository {
 
     const statusFilter = this.userGamesStatusFilter(filter)
     const queryFilter = this.userGamesQueryFilter(query)
+    const platformFilter = this.userGamesPlatformFilter(platforms)
     const excludeFilter =
       excludeIgdbId !== undefined
         ? Prisma.sql`AND ug.igdb_id <> ${excludeIgdbId}`
@@ -493,6 +509,7 @@ export class UserRepository {
       WHERE ug.user_id = ${userId}
       ${statusFilter}
       ${queryFilter}
+      ${platformFilter}
       ${excludeFilter}
       ORDER BY ${orderByClause}, ug.id
       ${limitClause}

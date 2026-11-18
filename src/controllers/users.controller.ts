@@ -36,7 +36,7 @@ export class UserController {
   }
 
   async getAllUserGames(request: FastifyRequest, reply: FastifyReply) {
-    const { pageIndex, query, filter, sortBy, sortOrder } =
+    const { pageIndex, query, filter, platforms, sortBy, sortOrder } =
       UserSchema.QueryStringSchema.parse(request.query)
     const userId = request.user.userId
 
@@ -47,7 +47,8 @@ export class UserController {
         filter,
         query,
         sortBy,
-        sortOrder
+        sortOrder,
+        { platforms }
       )
 
     return reply

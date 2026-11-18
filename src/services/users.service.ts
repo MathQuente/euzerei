@@ -484,11 +484,16 @@ export class UserService {
     sortBy === 'completedAt'
       ? 'desc'
       : 'asc',
-    options: { previewPerStatus?: number; includeLibraryIds?: boolean } = {}
+    options: {
+      previewPerStatus?: number
+      includeLibraryIds?: boolean
+      platforms?: Platform[]
+    } = {}
   ) {
     await this.requireUser(userId)
 
-    const isOverview = !filter && !query
+    const platforms = options.platforms?.length ? options.platforms : undefined
+    const isOverview = !filter && !query && !platforms
     const previewPerStatus = isOverview
       ? (options.previewPerStatus ?? this.LIBRARY_PREVIEW_PER_STATUS)
       : undefined
@@ -497,6 +502,7 @@ export class UserService {
       userId,
       filter,
       query,
+      platforms,
       sortBy,
       sortOrder,
       skip: filter ? pageIndex * this.USER_GAMES_PER_PAGE : undefined,
@@ -531,8 +537,13 @@ export class UserService {
       includeLibraryIds
         ? this.userRepository.findLibraryIgdbIds(userId)
         : undefined,
-      query
-        ? this.userRepository.countGamesOfUser({ userId, filter, query })
+      query || platforms
+        ? this.userRepository.countGamesOfUser({
+            userId,
+            filter,
+            query,
+            platforms
+          })
         : undefined
     ])
 

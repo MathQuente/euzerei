@@ -640,6 +640,84 @@ describe('UserService.findManyUserGames', () => {
     ).toBe(30)
   })
 
+  it('filters by platform: skips the overview and counts only the matches', async () => {
+    const findManyGamesOfUser = vi.fn().mockResolvedValue([])
+    const countGamesOfUser = vi.fn().mockResolvedValue(4)
+    const service = new UserService(
+      fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findManyGamesOfUser,
+        findGamesCountByStatus: vi
+          .fn()
+          .mockResolvedValue(statusCounts({ BACKLOG: 30 })),
+        countGamesOfUser
+      }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+
+    const result = await service.findManyUserGames(
+      'user-1',
+      0,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { platforms: ['PLAYSTATION', 'XBOX'] }
+    )
+
+    expect(findManyGamesOfUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platforms: ['PLAYSTATION', 'XBOX'],
+        previewPerStatus: undefined
+      })
+    )
+    expect(countGamesOfUser).toHaveBeenCalledWith({
+      userId: 'user-1',
+      filter: undefined,
+      query: undefined,
+      platforms: ['PLAYSTATION', 'XBOX']
+    })
+    expect(result.total).toBe(4)
+    expect(result).not.toHaveProperty('libraryIgdbIds')
+  })
+
+  it('treats an empty platform list like no filter', async () => {
+    const countGamesOfUser = vi.fn()
+    const findManyGamesOfUser = vi.fn().mockResolvedValue([])
+    const service = new UserService(
+      fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findManyGamesOfUser,
+        findGamesCountByStatus: vi
+          .fn()
+          .mockResolvedValue(statusCounts({ PLAYED: 7 })),
+        findLibraryIgdbIds: vi.fn().mockResolvedValue([]),
+        countGamesOfUser
+      }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+
+    const result = await service.findManyUserGames(
+      'user-1',
+      0,
+      'PLAYED',
+      undefined,
+      undefined,
+      undefined,
+      { platforms: [] }
+    )
+
+    expect(countGamesOfUser).not.toHaveBeenCalled()
+    expect(findManyGamesOfUser).toHaveBeenCalledWith(
+      expect.objectContaining({ platforms: undefined })
+    )
+    expect(result.total).toBe(7)
+  })
+
   it('does not count by search when there is no query', async () => {
     const countGamesOfUser = vi.fn()
     const service = new UserService(

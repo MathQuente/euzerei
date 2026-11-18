@@ -203,3 +203,44 @@ describe('RouletteQueryStringSchema', () => {
     }
   })
 })
+
+describe('QueryStringSchema platforms', () => {
+  it('reads a comma separated list, without repeats', () => {
+    expect(
+      QueryStringSchema.parse({ platforms: 'STEAM,XBOX,STEAM' }).platforms
+    ).toEqual(['STEAM', 'XBOX'])
+  })
+
+  it('drops unknown values and keeps the valid ones', () => {
+    expect(
+      QueryStringSchema.parse({ platforms: 'PLAYSTATION, nope ,EPIC' })
+        .platforms
+    ).toEqual(['PLAYSTATION', 'EPIC'])
+  })
+
+  it('is undefined when missing, and an empty list when nothing is valid', () => {
+    expect(QueryStringSchema.parse({}).platforms).toBeUndefined()
+    expect(QueryStringSchema.parse({ platforms: 'nope' }).platforms).toEqual([])
+  })
+
+  it('survives being parsed a second time (the route and the controller both parse)', () => {
+    const once = QueryStringSchema.parse({ platforms: 'PLAYSTATION,XBOX' })
+    expect(QueryStringSchema.parse(once).platforms).toEqual([
+      'PLAYSTATION',
+      'XBOX'
+    ])
+  })
+
+  it('also accepts a repeated parameter (an array)', () => {
+    expect(
+      QueryStringSchema.parse({ platforms: ['STEAM', 'nope', 'XBOX'] })
+        .platforms
+    ).toEqual(['STEAM', 'XBOX'])
+  })
+
+  it('ignores a value that is too long instead of failing the request', () => {
+    expect(
+      QueryStringSchema.parse({ platforms: 'STEAM,'.repeat(40) }).platforms
+    ).toBeUndefined()
+  })
+})

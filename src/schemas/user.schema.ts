@@ -90,6 +90,20 @@ export const QueryStringSchema = z.object({
     ])
     .optional()
     .catch(undefined),
+  platforms: z
+    .union([z.string().max(100), z.array(z.string().max(20)).max(10)])
+    .transform(value => {
+      const items = Array.isArray(value) ? value : value.split(',')
+      return [
+        ...new Set(
+          items
+            .map(item => PlatformEnumSchema.safeParse(item.trim()))
+            .flatMap(result => (result.success ? [result.data] : []))
+        )
+      ]
+    })
+    .optional()
+    .catch(undefined),
   sortBy: z
     .enum([
       'gameName',
