@@ -206,7 +206,7 @@ export class IGDBService {
   static async getGameById(igdbId: number): Promise<IGDBGame | null> {
     const results = await this.request<IGDBGame[]>(
       'games',
-      `where id = ${igdbId}; fields id,name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,category,game_type,parent_game.id,parent_game.name,parent_game.cover.url,rating,follows,similar_games,game_status,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,release_dates.date,release_dates.platform.name,screenshots.image_id,screenshots.width,screenshots.height,videos.video_id,videos.name; limit 1;`
+      `where id = ${igdbId}; fields id,name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,category,game_type,parent_game.id,parent_game.name,parent_game.cover.url,rating,follows,similar_games,game_status,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,release_dates.date,release_dates.date_format,release_dates.platform.name,screenshots.image_id,screenshots.width,screenshots.height,videos.video_id,videos.name; limit 1;`
     )
     return results[0] ?? null
   }
@@ -533,7 +533,7 @@ export class IGDBService {
     const [games, rawTotal] = await Promise.all([
       this.request<IGDBGame[]>(
         'games',
-        `fields id,name,cover.url,platforms.name,first_release_date,category,game_type,parent_game; ${where}; sort first_release_date asc; limit ${limit}; offset ${pageIndex * limit};`
+        `fields id,name,cover.url,platforms.name,first_release_date,release_dates.date,release_dates.date_format,category,game_type,parent_game; ${where}; sort first_release_date asc; limit ${limit}; offset ${pageIndex * limit};`
       ),
       this.countRequest('games', `${where};`)
     ])

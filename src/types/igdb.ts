@@ -25,7 +25,11 @@ export interface IGDBGame {
   game_status?: number
   similar_games?: number[]
   involved_companies?: IGDBInvolvedCompany[]
-  release_dates?: { date?: number; platform?: { name: string } }[]
+  release_dates?: {
+    date?: number
+    date_format?: number
+    platform?: { name: string }
+  }[]
   screenshots?: { image_id: string; width?: number; height?: number }[]
   videos?: { video_id: string; name?: string }[]
 }

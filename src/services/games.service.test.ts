@@ -221,3 +221,65 @@ describe('GameService.findGameById slug', () => {
     expect(upsertMany).not.toHaveBeenCalled()
   })
 })
+
+describe('GameService.findGameById release precision', () => {
+  function precisionSetup(game: Partial<IGDBGame>) {
+    const service = new GameService(
+      {
+        getAverageRatingsForGames: vi.fn().mockResolvedValue(new Map())
+      } as unknown as RatingRepository,
+      {
+        findSlugsByIds: vi.fn().mockResolvedValue(new Map()),
+        upsertMany: vi.fn().mockResolvedValue(undefined)
+      } as unknown as GameCacheRepository,
+      {} as UserRepository,
+      {
+        get: vi.fn().mockResolvedValue(null),
+        set: vi.fn().mockResolvedValue(undefined)
+      } as unknown as CacheRepository
+    )
+    vi.spyOn(IGDBService, 'getGameById').mockResolvedValue({
+      id: 7,
+      name: 'GTA',
+      ...game
+    } as never)
+    vi.spyOn(IGDBService, 'getRelatedGames').mockResolvedValue([])
+    return service
+  }
+
+  const GTA = 1795046400
+  const NEW_YEAR_EVE = 1798675200
+
+  it('reports an exact date and the precision of each platform', async () => {
+    const service = precisionSetup({
+      first_release_date: GTA,
+      release_dates: [
+        { date: GTA, date_format: 0, platform: { name: 'PlayStation 5' } },
+        { date: NEW_YEAR_EVE, date_format: 2, platform: { name: 'PC' } }
+      ]
+    })
+    const { game } = await service.findGameById(7)
+    expect(game.releaseDatePrecision).toBe('day')
+    expect(game.releaseDates).toEqual([
+      { platformName: 'PlayStation 5', date: GTA, precision: 'day' },
+      { platformName: 'PC', date: NEW_YEAR_EVE, precision: 'year' }
+    ])
+  })
+
+  it('flags a year-only date as uncertain even though it carries a day', async () => {
+    const service = precisionSetup({
+      first_release_date: NEW_YEAR_EVE,
+      release_dates: [
+        { date: NEW_YEAR_EVE, date_format: 2, platform: { name: 'PC' } }
+      ]
+    })
+    const { game } = await service.findGameById(7)
+    expect(game.releaseDatePrecision).toBe('year')
+  })
+
+  it('leaves the precision unknown when IGDB sent no release_dates', async () => {
+    const service = precisionSetup({ first_release_date: GTA })
+    const { game } = await service.findGameById(7)
+    expect(game.releaseDatePrecision).toBeUndefined()
+  })
+})

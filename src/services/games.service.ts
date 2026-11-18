@@ -6,6 +6,11 @@ import { UserRepository } from '../repositories/users.repository'
 import { IGDBService } from './igdb.service'
 import { CacheRepository } from '../repositories/cache.repository'
 import { isHiddenFromCatalog } from '../utils/game-status'
+import {
+  type ReleasePrecision,
+  precisionFromFormat,
+  releaseDatePrecision
+} from '../utils/release-precision'
 
 const TRENDING_WINDOW_DAYS = 30
 const GAME_CACHE_TTL_SECONDS = 60 * 60
@@ -45,25 +50,30 @@ export class GameService {
 
     const releaseDates = game.release_dates
       ?.filter(rd => rd.platform?.name)
-      .reduce<Array<{ platformName: string; date: number | null }>>(
-        (acc, rd) => {
-          const platformName = rd.platform?.name as string
-          const date = rd.date ?? null
-          const existing = acc.find(r => r.platformName === platformName)
+      .reduce<
+        Array<{
+          platformName: string
+          date: number | null
+          precision?: ReleasePrecision
+        }>
+      >((acc, rd) => {
+        const platformName = rd.platform?.name as string
+        const date = rd.date ?? null
+        const precision = precisionFromFormat(rd.date_format)
+        const existing = acc.find(r => r.platformName === platformName)
 
-          if (!existing) {
-            acc.push({ platformName, date })
-          } else if (
-            date !== null &&
-            (existing.date === null || date < existing.date)
-          ) {
-            existing.date = date
-          }
+        if (!existing) {
+          acc.push({ platformName, date, precision })
+        } else if (
+          date !== null &&
+          (existing.date === null || date < existing.date)
+        ) {
+          existing.date = date
+          existing.precision = precision
+        }
 
-          return acc
-        },
-        []
-      )
+        return acc
+      }, [])
 
     return {
       igdbId: game.id,
@@ -74,6 +84,10 @@ export class GameService {
       genres: game.genres?.map(g => g.name),
       platforms: game.platforms?.map(p => p.name),
       releaseDate: game.first_release_date,
+      releaseDatePrecision: releaseDatePrecision(
+        game.first_release_date,
+        game.release_dates
+      ),
       rating,
       developers: developers && developers.length > 0 ? developers : undefined,
       publishers: publishers && publishers.length > 0 ? publishers : undefined,

@@ -1,5 +1,16 @@
 import { z } from 'zod'
 
+const PrecisionSchema = z.enum([
+  'day',
+  'month',
+  'q1',
+  'q2',
+  'q3',
+  'q4',
+  'year',
+  'tbd'
+])
+
 export const IGDBGameSchema = z.object({
   igdbId: z.number(),
   slug: z.string().nullable().optional(),
@@ -9,6 +20,7 @@ export const IGDBGameSchema = z.object({
   genres: z.array(z.string()).optional(),
   platforms: z.array(z.string()).optional(),
   releaseDate: z.number().optional(),
+  releaseDatePrecision: PrecisionSchema.optional(),
   rating: z.number().nullable(),
   developers: z.array(z.string()).optional(),
   publishers: z.array(z.string()).optional(),
@@ -26,7 +38,8 @@ export const IGDBGameSchema = z.object({
     .array(
       z.object({
         platformName: z.string(),
-        date: z.number().nullable()
+        date: z.number().nullable(),
+        precision: PrecisionSchema.optional()
       })
     )
     .optional(),
