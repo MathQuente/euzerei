@@ -403,7 +403,7 @@ export class UserRepository {
               ? Prisma.sql`COALESCE(ugst.hours_played, 0) ${direction}`
               : sortBy === 'completedAt'
                 ? Prisma.sql`COALESCE(ug.completed_at, ug.updated_at) ${direction}`
-                : Prisma.sql`ug.updated_at ${direction}`
+                : Prisma.sql`ug.created_at ${direction}`
 
     const statusFilter =
       filter === QUEUE_FILTER
