@@ -177,8 +177,18 @@ export const UserGamePlayedCountUpdateBodySchema = z.object({
   incrementValue: z.number().int().min(-1).max(1)
 })
 
+// Horas digitadas à mão: uma casa decimal (as importações gravam duas, por
+// outro caminho). O float de 5.5 * 10 é exato; o epsilon cobre 0.1 * 3 e afins.
+const manualHours = z
+  .number()
+  .min(0)
+  .max(9999.9)
+  .refine(v => Math.abs(v * 10 - Math.round(v * 10)) < 1e-6, {
+    message: 'Use no máximo uma casa decimal.'
+  })
+
 export const UserGameHoursUpdateBodySchema = z.object({
-  hoursPlayed: z.number().min(0).max(9999.99)
+  hoursPlayed: manualHours
 })
 
 export const UserGameCompletedAtUpdateBodySchema = z.object({
@@ -374,7 +384,7 @@ export const UserGamePlatformParamsSchema = z
 
 export const UserGamePlatformUpdateBodySchema = z
   .object({
-    hoursPlayed: z.number().min(0).max(9999.99).nullable().optional(),
+    hoursPlayed: manualHours.nullable().optional(),
     completions: z.number().int().min(0).max(999).optional(),
     completedAt: z.iso.date().nullable().optional()
   })

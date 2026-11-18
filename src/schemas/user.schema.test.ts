@@ -5,6 +5,8 @@ import {
   QueryStringSchema,
   UpdateUserBodySchema,
   UserGameBodySchema,
+  UserGameHoursUpdateBodySchema,
+  UserGamePlatformUpdateBodySchema,
   UserGamePlatformParamsSchema,
   UserGameCompletedAtUpdateBodySchema,
   ConsoleEnumSchema,
@@ -242,5 +244,29 @@ describe('QueryStringSchema platforms', () => {
     expect(
       QueryStringSchema.parse({ platforms: 'STEAM,'.repeat(40) }).platforms
     ).toBeUndefined()
+  })
+})
+
+describe('manual hours', () => {
+  const hours = (v: number) =>
+    UserGameHoursUpdateBodySchema.safeParse({ hoursPlayed: v }).success
+
+  it('accepts zero to one decimal place, up to 9999.9', () => {
+    for (const v of [0, 0.1, 5.5, 12, 0.3, 4.7, 9999.9])
+      expect(hours(v)).toBe(true)
+  })
+
+  it('rejects two decimal places and values above the limit', () => {
+    for (const v of [5.53, 0.03, 9999.99, 10000, -1])
+      expect(hours(v)).toBe(false)
+  })
+
+  it('applies the same rule to the per-platform hours, which may be null or missing', () => {
+    const platform = (body: object) =>
+      UserGamePlatformUpdateBodySchema.safeParse(body).success
+    expect(platform({ hoursPlayed: 5.5 })).toBe(true)
+    expect(platform({ hoursPlayed: null })).toBe(true)
+    expect(platform({ completions: 2 })).toBe(true)
+    expect(platform({ hoursPlayed: 5.53 })).toBe(false)
   })
 })
