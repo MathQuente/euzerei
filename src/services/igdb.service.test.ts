@@ -506,6 +506,27 @@ describe('IGDBService status in the cache input and listings', () => {
       expect.stringContaining('& game_status != 7;')
     )
   })
+
+  it('leaves editions out of the coming soon list and of its count', async () => {
+    const request = mockRequest([])
+    const count = vi
+      .spyOn(
+        IGDBService as unknown as { countRequest: RequestFn },
+        'countRequest'
+      )
+      .mockResolvedValue(0 as never)
+
+    await IGDBService.getComingSoonGames(20, 0)
+
+    expect(request).toHaveBeenCalledWith(
+      'games',
+      expect.stringContaining('& version_parent = null &')
+    )
+    expect(count).toHaveBeenCalledWith(
+      'games',
+      expect.stringContaining('& version_parent = null &')
+    )
+  })
 })
 
 describe('IGDBService lookups that feed games_cache', () => {

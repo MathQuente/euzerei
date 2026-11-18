@@ -13,6 +13,13 @@ export const EROTIC_EXCEPTION_IDS = [
 const EROTIC_EXCEPTION_LIST = EROTIC_EXCEPTION_IDS.join(',')
 const EXCLUDE_EROTIC = `(themes != (${EROTIC_THEME_ID}) | id = (${EROTIC_EXCEPTION_LIST}))`
 
+// IGDB registers an edition or version ("GTA VI: Ultimate Edition") as another
+// game with the same date and a version_parent. Used only by coming soon: in
+// the released list the same filter would also drop remasters and bundles that
+// carry a version_parent (measured: 5 and 113 of 177), and nothing there
+// duplicates today. DLCs and expansions use parent_game and still pass.
+const EXCLUDE_EDITIONS = 'version_parent = null'
+
 export class IGDBService {
   private static accessToken: string | null = null
   private static tokenExpiresAt: number = 0
@@ -529,7 +536,7 @@ export class IGDBService {
     pageIndex = 0
   ): Promise<{ games: IGDBGame[]; total: number }> {
     const cutoff = this.getReleaseCutoffEpoch()
-    const where = `where first_release_date >= ${cutoff} & cover != null & ${EXCLUDE_EROTIC} & hypes >= ${this.MIN_HYPES} & game_status != ${GAME_STATUS.RUMORED}`
+    const where = `where first_release_date >= ${cutoff} & cover != null & ${EXCLUDE_EROTIC} & ${EXCLUDE_EDITIONS} & hypes >= ${this.MIN_HYPES} & game_status != ${GAME_STATUS.RUMORED}`
     const [games, rawTotal] = await Promise.all([
       this.request<IGDBGame[]>(
         'games',
