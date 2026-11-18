@@ -7,7 +7,7 @@ const DESTROY_TIMEOUT_MS = 5_000
 const PUBLIC_ID_PREFIX = 'images/'
 const VERSION_SEGMENT = /^v\d+$/
 const UPLOAD_FOLDER = 'images'
-const UPLOAD_ALLOWED_FORMATS = 'jpg,png,webp'
+const UPLOAD_ALLOWED_FORMATS = 'jpg,png,webp,gif'
 
 export type UploadSignature = {
   cloudName: string

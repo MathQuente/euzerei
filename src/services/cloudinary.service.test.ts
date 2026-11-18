@@ -104,11 +104,11 @@ describe('CloudinaryService', () => {
         timestamp: 1_700_000_000,
         folder: 'images',
         publicId: expect.stringMatching(/^[0-9a-f-]{36}$/),
-        allowedFormats: 'jpg,png,webp',
+        allowedFormats: 'jpg,png,webp,gif',
         uploadPreset: 'signed_preset',
         signature: createHash('sha1')
           .update(
-            `allowed_formats=jpg,png,webp&folder=images&public_id=${result.publicId}&timestamp=1700000000&upload_preset=signed_presetsecret`
+            `allowed_formats=jpg,png,webp,gif&folder=images&public_id=${result.publicId}&timestamp=1700000000&upload_preset=signed_presetsecret`
           )
           .digest('hex')
       })
