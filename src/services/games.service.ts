@@ -404,7 +404,7 @@ export class GameService {
     } else {
       games = (await IGDBService.getSimilarGames(igdbId))
         .filter(g => !isHiddenFromCatalog(g.game_status, g.first_release_date))
-        .slice(0, 6)
+        .slice(0, 12)
 
       await this.cacheRepository.set(key, { games }, GAME_CACHE_TTL_SECONDS)
     }

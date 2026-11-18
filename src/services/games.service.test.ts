@@ -58,16 +58,21 @@ describe('GameService.findSimilarGames', () => {
     expect(cached.games.map(g => g.id)).toEqual([1, 2, 5])
   })
 
-  it('fills the list up to six after dropping hidden games', async () => {
+  it('fills the list up to twelve after dropping hidden games', async () => {
     const { service } = setup()
     vi.spyOn(IGDBService, 'getSimilarGames').mockResolvedValue([
       ...[1, 2, 3].map(id => ({ id, name: `Rumored ${id}`, game_status: 7 })),
-      ...[4, 5, 6, 7, 8, 9, 10].map(id => ({ id, name: `Game ${id}` }))
+      ...Array.from({ length: 14 }, (_, i) => i + 4).map(id => ({
+        id,
+        name: `Game ${id}`
+      }))
     ] as IGDBGame[])
 
     const result = await service.findSimilarGames(10)
 
-    expect(result.map(g => g.igdbId)).toEqual([4, 5, 6, 7, 8, 9])
+    expect(result.map(g => g.igdbId)).toEqual([
+      4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    ])
   })
 })
 
