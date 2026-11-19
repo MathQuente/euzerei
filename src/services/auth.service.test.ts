@@ -360,20 +360,152 @@ describe('AuthService.isRefreshTokenActive', () => {
   })
 })
 
-describe('AuthService.createUser', () => {
-  it('throws ClientError when the email is already used', async () => {
-    const authRepository = fakeAuthRepository({
-      findByEmail: vi.fn().mockResolvedValue({ id: 'existing' })
-    })
-    const service = new AuthService(
-      authRepository,
-      fakeJwt(),
-      fakeCacheRepository
-    )
+describe('AuthService.createUser (cadastro por confirmação)', () => {
+  function emailMock() {
+    return {
+      sendRegistrationConfirmationEmail: vi.fn().mockResolvedValue(undefined),
+      sendSignupAttemptNoticeEmail: vi.fn().mockResolvedValue(undefined)
+    }
+  }
 
-    await expect(
-      service.createUser({ email: 'a@a.com', password: 'senha123' })
-    ).rejects.toThrow(ClientError)
+  async function register(
+    existing: unknown,
+    cache = fakeCache(),
+    email = emailMock()
+  ) {
+    const createUser = vi.fn()
+    const service = new AuthService(
+      fakeAuthRepository({
+        findByEmail: vi.fn().mockResolvedValue(existing),
+        createUser
+      }),
+      fakeJwt(),
+      cache,
+      email as unknown as EmailService
+    )
+    const result = await service.createUser({
+      email: 'A@a.com',
+      password: 'k3!fgh-long-pw'
+    })
+    await new Promise(resolve => setImmediate(resolve))
+    return { result, createUser, cache, email }
+  }
+
+  it('returns the same (empty) result for a new and an existing email', async () => {
+    const fresh = await register(null)
+    const taken = await register({ id: 'existing' })
+    expect(fresh.result).toBeUndefined()
+    expect(taken.result).toBeUndefined()
+  })
+
+  it('does not create the user before confirmation and stores only a password hash', async () => {
+    const { createUser, cache, email } = await register(null)
+
+    expect(createUser).not.toHaveBeenCalled()
+    expect(email.sendRegistrationConfirmationEmail).toHaveBeenCalledWith(
+      'a@a.com',
+      expect.stringContaining('/confirmar-cadastro?token=')
+    )
+    const [key, value] = cache.set.mock.calls[0]
+    expect(String(key)).toMatch(/^signup-pending:[0-9a-f]{64}$/)
+    expect(JSON.stringify(value)).not.toContain('k3!fgh-long-pw')
+    expect(value).toMatchObject({ email: 'a@a.com' })
+  })
+
+  it('sends the attempt notice, and no confirmation, when the email exists', async () => {
+    const { createUser, cache, email } = await register({ id: 'existing' })
+
+    expect(createUser).not.toHaveBeenCalled()
+    expect(cache.set).not.toHaveBeenCalled()
+    expect(email.sendSignupAttemptNoticeEmail).toHaveBeenCalledWith(
+      'a@a.com',
+      expect.any(String),
+      expect.stringContaining('/forgot-password')
+    )
+    expect(email.sendRegistrationConfirmationEmail).not.toHaveBeenCalled()
+  })
+
+  it('invalidates the previous pending token when the email asks again', async () => {
+    const cache = fakeCache('previous-hash')
+    await register(null, cache)
+    expect(cache.del).toHaveBeenCalledWith('signup-pending:previous-hash')
+  })
+
+  it('stays silent past the per-email limit, for new and existing emails', async () => {
+    for (const existing of [null, { id: 'existing' }]) {
+      const cache = fakeCache()
+      cache.increment.mockResolvedValue(99)
+      const { result, email } = await register(existing, cache)
+      expect(result).toBeUndefined()
+      expect(email.sendRegistrationConfirmationEmail).not.toHaveBeenCalled()
+      expect(email.sendSignupAttemptNoticeEmail).not.toHaveBeenCalled()
+    }
+  })
+
+  it('does not fail when the email cannot be delivered', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(console, 'info').mockImplementation(() => {})
+    const email = emailMock()
+    email.sendRegistrationConfirmationEmail.mockRejectedValue(new Error('smtp'))
+    await expect(register(null, fakeCache(), email)).resolves.toBeDefined()
+    vi.restoreAllMocks()
+  })
+})
+
+describe('AuthService.confirmRegistration', () => {
+  const pending = { email: 'a@a.com', passwordHash: 'hash' }
+
+  function build(stored: unknown, existing: unknown = null) {
+    const createUser = vi.fn().mockResolvedValue({ id: 'user-1' })
+    const cache = fakeCache(stored)
+    const service = new AuthService(
+      fakeAuthRepository({
+        findByEmail: vi.fn().mockResolvedValue(existing),
+        createUser,
+        saveToken: vi.fn()
+      }),
+      fakeJwt(),
+      cache
+    )
+    return { service, createUser, cache }
+  }
+
+  it('creates a verified user and signs them in', async () => {
+    const { service, createUser } = build(pending)
+    await expect(service.confirmRegistration('tok')).resolves.toMatchObject({
+      user: { id: 'user-1' }
+    })
+    expect(createUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: 'a@a.com',
+        password: 'hash',
+        emailVerifiedAt: expect.any(Date)
+      })
+    )
+  })
+
+  it('rejects an unknown, used or expired token', async () => {
+    const { service, createUser } = build(null)
+    await expect(service.confirmRegistration('tok')).rejects.toMatchObject({
+      statusCode: 400
+    })
+    expect(createUser).not.toHaveBeenCalled()
+  })
+
+  it('consumes the token (single use)', async () => {
+    const { service, cache } = build(pending)
+    await service.confirmRegistration('tok')
+    expect(cache.getdel).toHaveBeenCalledWith(
+      expect.stringMatching(/^signup-pending:[0-9a-f]{64}$/)
+    )
+  })
+
+  it('rejects when the email was taken between register and confirm', async () => {
+    const { service, createUser } = build(pending, { id: 'someone' })
+    await expect(service.confirmRegistration('tok')).rejects.toMatchObject({
+      statusCode: 400
+    })
+    expect(createUser).not.toHaveBeenCalled()
   })
 })
 
@@ -950,62 +1082,6 @@ describe('AuthService email verification', () => {
       sendPasswordResetEmail: vi.fn()
     } as unknown as EmailService
   }
-
-  function tokenFrom(send: ReturnType<typeof vi.fn>) {
-    const url = send.mock.calls[0][1] as string
-    return new URL(url).searchParams.get('token') as string
-  }
-
-  it('sends a verification email on signup and stores only the hash of the token', async () => {
-    const send = vi.fn().mockResolvedValue(undefined)
-    const cache = fakeCache()
-    const service = new AuthService(
-      fakeAuthRepository({
-        findByEmail: vi.fn().mockResolvedValue(null),
-        createUser: vi.fn().mockResolvedValue({ id: 'user-1' }),
-        saveToken: vi.fn()
-      }),
-      fakeJwt(),
-      cache,
-      emailServiceMock(send)
-    )
-
-    await service.createUser({ email: 'a@a.com', password: 'k3!fgh-long-pw' })
-
-    const token = tokenFrom(send)
-    expect(send).toHaveBeenCalledWith(
-      'a@a.com',
-      expect.stringContaining('/verify-email?token=')
-    )
-    expect(token).toMatch(/^[0-9a-f]{64}$/)
-    expect(cache.set).toHaveBeenCalledWith(
-      expect.stringMatching(/^email-verification:[0-9a-f]{64}$/),
-      'user-1',
-      24 * 60 * 60
-    )
-    const storedKeys = cache.set.mock.calls.map(([key]) => String(key))
-    expect(storedKeys.some(key => key.includes(token))).toBe(false)
-  })
-
-  it('does not fail the signup when the email cannot be delivered', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.spyOn(console, 'info').mockImplementation(() => {})
-    const service = new AuthService(
-      fakeAuthRepository({
-        findByEmail: vi.fn().mockResolvedValue(null),
-        createUser: vi.fn().mockResolvedValue({ id: 'user-1' }),
-        saveToken: vi.fn()
-      }),
-      fakeJwt(),
-      fakeCache(),
-      emailServiceMock(vi.fn().mockRejectedValue(new Error('no api key')))
-    )
-
-    await expect(
-      service.createUser({ email: 'a@a.com', password: 'k3!fgh-long-pw' })
-    ).resolves.toMatchObject({ user: { id: 'user-1' } })
-    vi.restoreAllMocks()
-  })
 
   it('marks the account as verified with a valid token and consumes it', async () => {
     const markEmailVerified = vi.fn()

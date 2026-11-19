@@ -2,6 +2,7 @@ export interface CreateUserDTO {
   email: string
   password: string
   userName?: string
+  emailVerifiedAt?: Date
 }
 
 export interface AddGameDTO {

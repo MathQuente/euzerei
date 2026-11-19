@@ -37,8 +37,19 @@ export class AuthController {
   async createUser(request: FastifyRequest, reply: FastifyReply) {
     const data = AuthSchema.RegisterBodySchema.parse(request.body)
 
+    await this.authService.createUser(data)
+
+    return reply.status(202).send({
+      message:
+        'Se o email puder ser usado, enviamos um link para concluir o cadastro.'
+    })
+  }
+
+  async confirmRegistration(request: FastifyRequest, reply: FastifyReply) {
+    const { token } = AuthSchema.VerifyEmailBodySchema.parse(request.body)
+
     const { accessToken, refreshToken, user } =
-      await this.authService.createUser(data)
+      await this.authService.confirmRegistration(token)
 
     setAuthCookies(reply, accessToken, refreshToken).send({ user })
   }

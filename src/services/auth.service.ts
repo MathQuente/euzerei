@@ -45,6 +45,15 @@ const VERIFICATION_REQUESTS_WINDOW_SECONDS = 60 * 60
 const emailVerificationRequestsKey = (userId: string) =>
   `email-verification-requests:${userId}`
 
+const SIGNUP_PENDING_TTL_SECONDS = 24 * 60 * 60
+const signupPendingKey = (tokenHash: string) => `signup-pending:${tokenHash}`
+const signupPendingCurrentKey = (email: string) =>
+  `signup-pending-current:${hashToken(normalizeEmail(email))}`
+const MAX_SIGNUP_REQUESTS_PER_HOUR = 3
+const SIGNUP_REQUESTS_WINDOW_SECONDS = 60 * 60
+const signupRequestsKey = (email: string) =>
+  `signup-requests:${hashToken(normalizeEmail(email))}`
+
 function randomToken() {
   return randomBytes(32).toString('hex')
 }
@@ -210,33 +219,111 @@ export class AuthService {
     return { accessToken, refreshToken: newRefreshToken, expiresAt }
   }
 
+  /**
+   * Responde igual para e-mail novo e já cadastrado: quem consulta não
+   * descobre se existe conta. A conta só nasce em confirmRegistration, com o
+   * link enviado ao e-mail.
+   */
   async createUser(data: CreateUserDTO) {
-    const emailIsAlreadyUsed = await this.authRepository.findByEmail(data.email)
+    const email = normalizeEmail(data.email)
 
-    if (emailIsAlreadyUsed) {
-      throw new ClientError('Este email já está em uso.')
+    const existing = await this.authRepository.findByEmail(email)
+    const passwordHash = await bcrypt.hash(data.password, BCRYPT_COST)
+
+    const requests = await this.cacheRepository.increment(
+      signupRequestsKey(email),
+      SIGNUP_REQUESTS_WINDOW_SECONDS
+    )
+    if (requests > MAX_SIGNUP_REQUESTS_PER_HOUR) return
+
+    if (existing) {
+      this.deliverInBackground(() =>
+        this.emailService.sendSignupAttemptNoticeEmail(
+          email,
+          `${process.env.FRONTEND_URL}/auth`,
+          `${process.env.FRONTEND_URL}/forgot-password`
+        )
+      )
+      return
     }
 
-    const passwordAfterHash = await bcrypt.hash(data.password, BCRYPT_COST)
-    const userNameGenerated = generateFromEmail(data.email, 4)
+    const token = randomToken()
+    const tokenHash = hashToken(token)
 
-    const user = await this.authRepository.createUser({
-      email: data.email,
-      password: passwordAfterHash,
-      userName: userNameGenerated
-    })
+    const previousHash = await this.cacheRepository.get(
+      signupPendingCurrentKey(email)
+    )
+    if (typeof previousHash === 'string') {
+      await this.cacheRepository.del(signupPendingKey(previousHash))
+    }
+    await this.cacheRepository.set(
+      signupPendingKey(tokenHash),
+      { email, passwordHash },
+      SIGNUP_PENDING_TTL_SECONDS
+    )
+    await this.cacheRepository.set(
+      signupPendingCurrentKey(email),
+      tokenHash,
+      SIGNUP_PENDING_TTL_SECONDS
+    )
+
+    const confirmUrl = `${process.env.FRONTEND_URL}/confirmar-cadastro?token=${token}`
+    if (process.env.NODE_ENV !== 'production') {
+      console.info('[Signup] dev confirmation link:', confirmUrl)
+    }
+    this.deliverInBackground(() =>
+      this.emailService.sendRegistrationConfirmationEmail(email, confirmUrl)
+    )
+  }
+
+  async confirmRegistration(token: string) {
+    const pending = (await this.cacheRepository.getdel(
+      signupPendingKey(hashToken(token))
+    )) as { email?: unknown; passwordHash?: unknown } | null
+
+    const invalid = () =>
+      new ClientError('Link de confirmação inválido ou expirado.', 400)
+
+    if (
+      !pending ||
+      typeof pending.email !== 'string' ||
+      typeof pending.passwordHash !== 'string'
+    ) {
+      throw invalid()
+    }
+
+    const email = pending.email
+    await this.cacheRepository.del(signupPendingCurrentKey(email))
+
+    if (await this.authRepository.findByEmail(email)) throw invalid()
+
+    let user: { id: string }
+    try {
+      user = await this.authRepository.createUser({
+        email,
+        password: pending.passwordHash,
+        userName: generateFromEmail(email, 4),
+        emailVerifiedAt: new Date()
+      })
+    } catch (error) {
+      if (isUniqueViolation(error)) throw invalid()
+      throw error
+    }
 
     const { accessToken, refreshToken } = await this.generateTokens(user.id)
     await this.recentAuthService.mark(user.id)
-    await this.issueEmailVerification(user.id, data.email)
 
-    return {
-      accessToken,
-      refreshToken,
-      user: {
-        id: user.id
-      }
-    }
+    return { accessToken, refreshToken, user: { id: user.id } }
+  }
+
+  private deliverInBackground(send: () => Promise<void>) {
+    void Promise.resolve()
+      .then(send)
+      .catch(err => {
+        console.error('[Signup] email delivery failed', {
+          error: err instanceof Error ? err.message : 'unknown error'
+        })
+      })
   }
 
   private async issueEmailVerification(userId: string, email: string) {

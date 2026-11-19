@@ -158,4 +158,31 @@ export class EmailService {
         'Se você não criou uma conta, pode ignorar este email. O link expira em 24 horas.'
     })
   }
+
+  async sendRegistrationConfirmationEmail(to: string, confirmUrl: string) {
+    await this.send(to, 'Conclua seu cadastro — EuZerei', {
+      heading: 'Conclua seu cadastro',
+      intro:
+        'Para criar sua conta no EuZerei, confirme que este email é seu usando o botão abaixo.',
+      buttonLabel: 'Criar minha conta',
+      url: confirmUrl,
+      footnote:
+        'Se você não pediu isso, pode ignorar este email. O link expira em 24 horas.'
+    })
+  }
+
+  async sendSignupAttemptNoticeEmail(
+    to: string,
+    loginUrl: string,
+    resetUrl: string
+  ) {
+    await this.send(to, 'Tentativa de cadastro com seu email — EuZerei', {
+      heading: 'Você já tem conta',
+      intro: `Alguém tentou criar uma conta no EuZerei com este email, mas ele já está cadastrado. Se foi você, entre na sua conta (com a senha, Google ou Discord): ${loginUrl}`,
+      buttonLabel: 'Redefinir a senha',
+      url: resetUrl,
+      footnote:
+        'Se não foi você, pode ignorar este email: nada foi alterado na sua conta.'
+    })
+  }
 }

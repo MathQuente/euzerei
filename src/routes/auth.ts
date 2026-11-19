@@ -69,6 +69,19 @@ export async function authRoutes(app: FastifyInstance) {
   )
 
   app.withTypeProvider<ZodTypeProvider>().post(
+    '/register/confirm',
+    {
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: '1 minute'
+        }
+      }
+    },
+    async (request, reply) => authController.confirmRegistration(request, reply)
+  )
+
+  app.withTypeProvider<ZodTypeProvider>().post(
     '/login',
     {
       config: {
