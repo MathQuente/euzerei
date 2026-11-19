@@ -233,3 +233,42 @@ export const IN_PROGRESS_REVIEW_TEXTS: Record<ReviewBand, readonly string[]> = {
     'Controles ruins e pouca graça. Desisti cedo.'
   ]
 }
+
+export const FEMALE_FIRST_NAMES: ReadonlySet<string> = new Set([
+  'Ana',
+  'Beatriz',
+  'Camila',
+  'Clara',
+  'Eduarda',
+  'Fernanda',
+  'Gabriela',
+  'Helena',
+  'Isabela',
+  'Joana',
+  'Julia',
+  'Larissa',
+  'Laura',
+  'Letícia',
+  'Luiza',
+  'Marina',
+  'Mariana',
+  'Natália',
+  'Paula',
+  'Raquel',
+  'Sabrina',
+  'Sofia',
+  'Tainá',
+  'Valentina',
+  'Vitória',
+  'Yasmin',
+  'Débora',
+  'Giovana',
+  'Jéssica',
+  'Lívia',
+  'Nathalia',
+  'Patrícia',
+  'Queila',
+  'Simone',
+  'Úrsula',
+  'Vanessa'
+])

@@ -19,3 +19,4 @@ sync-popular-*.jsonl
 backfill-steam-wishlist-dates-*.jsonl
 
 src/generated
+.env.production

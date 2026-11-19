@@ -7,6 +7,7 @@ import { IGDBService } from '../src/services/igdb.service'
 import { getSeedPassword } from '../src/utils/seed-password'
 import { createRng } from './seed-demo/random'
 import {
+  FEMALE_FIRST_NAMES,
   FIRST_NAMES,
   IN_PROGRESS_REVIEW_TEXTS,
   LAST_NAMES,
@@ -16,11 +17,13 @@ import {
 
 const USER_COUNT = 80
 const GAME_COUNT = 60
-const EMAIL_PREFIX = 'demo-'
-const EMAIL_DOMAIN = '@teste.local'
+const EMAIL_DOMAIN = `@${process.env.SEED_DEMO_EMAIL_DOMAIN ?? 'example.com'}`
+const DEMO_EMAIL_LIKE = `%${EMAIL_DOMAIN}`
 const SEED = Number(process.env.SEED_DEMO_SEED ?? 42)
 const FOLLOW_EMAIL = process.env.SEED_DEMO_FOLLOW_EMAIL
 const AVATAR_STYLE = process.env.SEED_DEMO_AVATAR_STYLE ?? 'lorelei'
+const AVATAR_SOURCE = process.env.SEED_DEMO_AVATAR_SOURCE ?? 'photo'
+const PORTRAITS_PER_GENDER = 100
 const BATCH_SIZE = 1000
 const DAY_MS = 86_400_000
 
@@ -81,7 +84,7 @@ async function insertInBatches<T>(
 }
 
 function demoEmailFilter(): Prisma.UserWhereInput {
-  return { email: { startsWith: EMAIL_PREFIX, endsWith: EMAIL_DOMAIN } }
+  return { email: { endsWith: EMAIL_DOMAIN } }
 }
 
 async function clean() {
@@ -99,6 +102,77 @@ function uniqueUserNames(count: number) {
     names.push(name)
   }
   return names
+}
+
+function emailFor(userName: string, taken: Set<string>) {
+  const slug = userName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, '')
+    .trim()
+    .split(/\s+/)
+    .join('.')
+  let email = ''
+  do {
+    email = `${slug}${rng.between(1, 99)}${EMAIL_DOMAIN}`
+  } while (taken.has(email))
+  taken.add(email)
+  return email
+}
+
+async function fetchPortrait(gender: 'men' | 'women', index: number) {
+  const url = `https://randomuser.me/api/portraits/${gender}/${index}.jpg`
+  const response = await fetch(url, { signal: AbortSignal.timeout(15_000) })
+  if (!response.ok) {
+    throw new Error(
+      `Portrait ${url} returned ${response.status}. Use SEED_DEMO_AVATAR_SOURCE=illustration to skip photos.`
+    )
+  }
+  const bytes = Buffer.from(await response.arrayBuffer())
+  return `data:image/jpeg;base64,${bytes.toString('base64')}`
+}
+
+async function buildPhotoAvatars(names: string[]) {
+  const pools = {
+    men: Array.from({ length: PORTRAITS_PER_GENDER }, (_, i) => i),
+    women: Array.from({ length: PORTRAITS_PER_GENDER }, (_, i) => i)
+  }
+  const seen = new Set<string>()
+  const avatars: string[] = []
+  for (const name of names) {
+    const gender = FEMALE_FIRST_NAMES.has(name.split(' ')[0]) ? 'women' : 'men'
+    const pool = pools[gender]
+    let avatar = ''
+    do {
+      if (pool.length === 0) {
+        throw new Error(`Ran out of distinct ${gender} portraits.`)
+      }
+      const [index] = pool.splice(Math.floor(rng.next() * pool.length), 1)
+      avatar = await fetchPortrait(gender, index)
+    } while (seen.has(avatar))
+    seen.add(avatar)
+    avatars.push(avatar)
+  }
+  return avatars
+}
+
+async function buildIllustrationAvatars(names: string[]) {
+  const { createAvatar } = await import('@dicebear/core')
+  const collection = await import('@dicebear/collection')
+  const avatarStyle = (collection as Record<string, unknown>)[AVATAR_STYLE]
+  if (!avatarStyle) throw new Error(`Unknown avatar style ${AVATAR_STYLE}.`)
+  return names.map(seed =>
+    createAvatar(avatarStyle as Parameters<typeof createAvatar>[0], {
+      seed
+    }).toDataUri()
+  )
+}
+
+function buildAvatars(names: string[]) {
+  if (AVATAR_SOURCE === 'photo') return buildPhotoAvatars(names)
+  if (AVATAR_SOURCE === 'illustration') return buildIllustrationAvatars(names)
+  throw new Error(`Unknown SEED_DEMO_AVATAR_SOURCE ${AVATAR_SOURCE}.`)
 }
 
 function roundHours(value: number) {
@@ -204,24 +278,17 @@ async function main() {
 
   const now = Date.now()
   const names = uniqueUserNames(USER_COUNT)
-  const { createAvatar } = await import('@dicebear/core')
-  const collection = await import('@dicebear/collection')
-  const avatarStyle = (collection as Record<string, unknown>)[AVATAR_STYLE]
-  if (!avatarStyle) throw new Error(`Unknown avatar style ${AVATAR_STYLE}.`)
+  const avatars = await buildAvatars(names)
+  const takenEmails = new Set<string>()
 
   const users = names.map((userName, i) => {
     const createdAt = new Date(now - rng.between(30, 365) * DAY_MS)
     return {
       id: crypto.randomUUID(),
-      email: `${EMAIL_PREFIX}${String(i + 1).padStart(2, '0')}${EMAIL_DOMAIN}`,
+      email: emailFor(userName, takenEmails),
       userName,
       password: passwordHash,
-      profilePicture: createAvatar(
-        avatarStyle as Parameters<typeof createAvatar>[0],
-        {
-          seed: userName
-        }
-      ).toDataUri(),
+      profilePicture: avatars[i],
       emailVerifiedAt: createdAt,
       createdAt,
       updatedAt: createdAt
@@ -415,7 +482,7 @@ async function count(sql: Prisma.Sql) {
 }
 
 async function validate() {
-  const demo = Prisma.sql`u.email LIKE ${EMAIL_PREFIX + '%' + EMAIL_DOMAIN}`
+  const demo = Prisma.sql`u.email LIKE ${DEMO_EMAIL_LIKE}`
   const checks: [string, Prisma.Sql][] = [
     [
       'rating on a wishlist game',
@@ -451,7 +518,7 @@ async function validate() {
 }
 
 async function summarize() {
-  const demo = Prisma.sql`u.email LIKE ${EMAIL_PREFIX + '%' + EMAIL_DOMAIN}`
+  const demo = Prisma.sql`u.email LIKE ${DEMO_EMAIL_LIKE}`
   const byStatus = await prisma.$queryRaw<{ status: string; n: bigint }[]>(
     Prisma.sql`SELECT ugs.status::text AS status, COUNT(*) AS n FROM user_games ug JOIN users u ON u.id = ug.user_id JOIN users_games_status ugs ON ugs.id = ug.user_games_status_id WHERE ${demo} GROUP BY 1 ORDER BY 2 DESC`
   )
