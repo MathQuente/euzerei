@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { parsePlatformFilterKeys } from '../utils/game-platform-filter'
 import { RELEASE_PRECISIONS } from '../utils/release-precision'
 
 export const PrecisionSchema = z.enum(RELEASE_PRECISIONS)
@@ -61,7 +62,12 @@ export const GameQueryStringSchema = z.object({
   sortBy: z
     .enum(['name', 'release_date', 'rating', 'relevance'])
     .catch('release_date'),
-  sortOrder: z.enum(['asc', 'desc']).catch('desc')
+  sortOrder: z.enum(['asc', 'desc']).catch('desc'),
+  platforms: z
+    .union([z.string().max(200), z.array(z.string()).max(20)])
+    .optional()
+    .catch(undefined)
+    .transform(parsePlatformFilterKeys)
 })
 
 export const ComingSoonQueryStringSchema = z.object({

@@ -66,34 +66,57 @@ export function relevanceOrderSql(query: string) {
     gc.igdb_id ASC`
 }
 
+/** Jogo com alguma das plataformas (nomes IGDB); sem nomes, não filtra. */
+function platformSql(names: string[]) {
+  return names.length > 0
+    ? Prisma.sql`AND gc.platforms && ARRAY[${Prisma.join(names)}]::text[]`
+    : Prisma.empty
+}
+
 export class GameCacheRepository {
   async findMany({
     limit = 20,
     pageIndex = 0,
     sortBy = 'release_date' as GameCacheSortBy,
     sortOrder = 'desc' as GameCacheSortOrder,
-    query
+    query,
+    platformNames = []
   }: {
     limit?: number
     pageIndex?: number
     sortBy?: GameCacheSortBy
     sortOrder?: GameCacheSortOrder
     query?: string
+    platformNames?: string[]
   }) {
     const offset = pageIndex * limit
 
     if (sortBy === 'rating') {
-      return this.findManyByRating({ limit, offset, sortOrder, query })
+      return this.findManyByRating({
+        limit,
+        offset,
+        sortOrder,
+        query,
+        platformNames
+      })
     }
 
     const searchTerm = normalizeSearchTerm(query)
     if (sortBy === 'relevance' && searchTerm) {
-      return this.findManyByRelevance({ limit, offset, query: searchTerm })
+      return this.findManyByRelevance({
+        limit,
+        offset,
+        query: searchTerm,
+        platformNames
+      })
     }
 
     const where: Prisma.GameCacheWhereInput = {
       AND: [catalogPopularityWhere(), catalogVisibilityWhere()],
-      ...(query ? { name: { contains: query, mode: 'insensitive' } } : {})
+      ...(query ? { name: { contains: query, mode: 'insensitive' } } : {}),
+      ...(platformNames.length > 0
+        ? { platforms: { hasSome: platformNames } }
+        : {})
     }
 
     const orderBy: Prisma.GameCacheOrderByWithRelationInput =
@@ -130,13 +153,15 @@ export class GameCacheRepository {
   private async findManyByRelevance({
     limit,
     offset,
-    query
+    query,
+    platformNames
   }: {
     limit: number
     offset: number
     query: string
+    platformNames: string[]
   }) {
-    const where = Prisma.sql`WHERE ${catalogPopularitySql()} AND ${catalogVisibilitySql()} AND ${relevanceMatchSql(query)}`
+    const where = Prisma.sql`WHERE ${catalogPopularitySql()} AND ${catalogVisibilitySql()} AND ${relevanceMatchSql(query)} ${platformSql(platformNames)}`
 
     const [games, countResult] = await Promise.all([
       prisma.$queryRaw<
@@ -188,18 +213,20 @@ export class GameCacheRepository {
     limit,
     offset,
     sortOrder,
-    query
+    query,
+    platformNames
   }: {
     limit: number
     offset: number
     sortOrder: GameCacheSortOrder
     query?: string
+    platformNames: string[]
   }) {
     const direction = sortOrder === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`
     const nameFilter = query
       ? Prisma.sql`AND gc.name ILIKE ${`%${query}%`}`
       : Prisma.empty
-    const where = Prisma.sql`WHERE ${catalogPopularitySql()} AND ${catalogVisibilitySql()} ${nameFilter}`
+    const where = Prisma.sql`WHERE ${catalogPopularitySql()} AND ${catalogVisibilitySql()} ${nameFilter} ${platformSql(platformNames)}`
 
     const [games, countResult] = await Promise.all([
       prisma.$queryRaw<

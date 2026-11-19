@@ -22,7 +22,7 @@ export class GameController {
   }
 
   async getAllGames(request: FastifyRequest, reply: FastifyReply) {
-    const { query, limit, pageIndex, sortBy, sortOrder } =
+    const { query, limit, pageIndex, sortBy, sortOrder, platforms } =
       GameSchema.GameQueryStringSchema.parse(request.query)
     const userId = request.user?.userId
 
@@ -32,7 +32,8 @@ export class GameController {
       pageIndex,
       sortBy,
       sortOrder,
-      userId
+      userId,
+      platforms
     )
 
     return reply.status(200).send({ games, total })

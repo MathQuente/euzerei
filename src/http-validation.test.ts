@@ -252,7 +252,8 @@ describe('HTTP validation with the real schemas', () => {
       pageIndex: 0,
       limit: 20,
       sortBy: 'release_date',
-      sortOrder: 'desc'
+      sortOrder: 'desc',
+      platforms: []
     })
 
     const coerced = await app.inject({
@@ -262,8 +263,14 @@ describe('HTTP validation with the real schemas', () => {
       pageIndex: 2,
       limit: 50,
       sortBy: 'rating',
-      sortOrder: 'asc'
+      sortOrder: 'asc',
+      platforms: []
     })
+
+    const filtered = await app.inject({
+      url: '/games?platforms=PC,sega,xbox,pc'
+    })
+    expect(filtered.json().platforms).toEqual(['pc', 'xbox'])
 
     const caught = await app.inject({
       url: '/games?sortBy=invalido&sortOrder=tanto-faz'

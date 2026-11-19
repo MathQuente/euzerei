@@ -5,6 +5,10 @@ import { RatingRepository } from '../repositories/rating.repository'
 import { UserRepository } from '../repositories/users.repository'
 import { IGDBService } from './igdb.service'
 import { CacheRepository } from '../repositories/cache.repository'
+import {
+  PlatformFilterKey,
+  platformNamesFor
+} from '../utils/game-platform-filter'
 import { isHiddenFromCatalog } from '../utils/game-status'
 import {
   type ReleasePrecision,
@@ -163,14 +167,16 @@ export class GameService {
     pageIndex: number,
     sortBy: 'name' | 'release_date' | 'rating' | 'relevance',
     sortOrder: 'asc' | 'desc',
-    userId?: string
+    userId?: string,
+    platforms: PlatformFilterKey[] = []
   ) {
     const { games: cached, total } = await this.gameCacheRepository.findMany({
       limit,
       pageIndex,
       sortBy,
       sortOrder,
-      query
+      query,
+      platformNames: platformNamesFor(platforms)
     })
 
     const igdbIds = cached.map(g => g.igdbId)

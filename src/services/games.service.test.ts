@@ -390,4 +390,42 @@ describe('GameService.findAllGames', () => {
       undefined
     ])
   })
+
+  it('passes the platform families to the repository as IGDB names', async () => {
+    const findMany = vi.fn().mockResolvedValue({ games: [], total: 0 })
+    const service = new GameService(
+      {
+        getAverageRatingsForGames: vi.fn().mockResolvedValue(new Map())
+      } as unknown as RatingRepository,
+      { findMany } as unknown as GameCacheRepository,
+      {} as UserRepository,
+      {} as CacheRepository
+    )
+
+    await service.findAllGames(undefined, 20, 0, 'name', 'asc', undefined, [
+      'mobile'
+    ])
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ platformNames: ['Android', 'iOS'] })
+    )
+  })
+
+  it('does not filter by platform when none is chosen', async () => {
+    const findMany = vi.fn().mockResolvedValue({ games: [], total: 0 })
+    const service = new GameService(
+      {
+        getAverageRatingsForGames: vi.fn().mockResolvedValue(new Map())
+      } as unknown as RatingRepository,
+      { findMany } as unknown as GameCacheRepository,
+      {} as UserRepository,
+      {} as CacheRepository
+    )
+
+    await service.findAllGames(undefined, 20, 0, 'name', 'asc')
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ platformNames: [] })
+    )
+  })
 })
