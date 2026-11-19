@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { EROTIC_EXCEPTION_IDS, IGDBService } from './igdb.service'
 import { IGDBGame } from '../types/igdb'
+import { MIN_HYPES, MIN_TOTAL_RATING_COUNT } from '../utils/catalog-popularity'
 
 type RequestFn = (endpoint: string, body: string) => Promise<unknown>
 
@@ -810,6 +811,69 @@ describe('IGDBService.getCoverUrlsByIds', () => {
     const request = mockRequest([])
 
     expect((await IGDBService.getCoverUrlsByIds([])).size).toBe(0)
+    expect(request).not.toHaveBeenCalled()
+  })
+})
+
+describe('IGDBService popular set for the cache', () => {
+  it('fetchPopularForSync asks for the popular games with the cursor and the theme filter', async () => {
+    const request = mockRequest([])
+
+    await IGDBService.fetchPopularForSync(1234, 500)
+
+    const query = request.mock.calls[0][1] as string
+    expect(query).toContain('where id > 1234 & cover != null &')
+    expect(query).toContain('(themes != (42) | id = (')
+    expect(query).toContain(
+      `(total_rating_count >= ${MIN_TOTAL_RATING_COUNT} | hypes >= ${MIN_HYPES})`
+    )
+    expect(query).toContain('sort id asc; limit 500;')
+    expect(query).toMatch(
+      /fields [^;]*hypes,total_rating_count[^;]*game_status;/
+    )
+  })
+
+  it('keeps the same field list in the three sync queries', async () => {
+    const request = mockRequest([])
+
+    await IGDBService.fetchForSync(0, 500)
+    await IGDBService.fetchMissingReleasedContent(0, 1000, 500)
+    await IGDBService.fetchPopularForSync(0, 500)
+
+    const lists = request.mock.calls.map(
+      ([, body]) => /fields ([^;]*);/.exec(String(body))![1]
+    )
+    expect(new Set(lists).size).toBe(1)
+  })
+
+  it('shares the popularity thresholds with the catalog constants', () => {
+    expect(IGDBService.MIN_HYPES).toBe(MIN_HYPES)
+    expect(IGDBService.MIN_TOTAL_RATING_COUNT).toBe(MIN_TOTAL_RATING_COUNT)
+  })
+
+  it('getPopularityByIds maps the counters, uses 0 for an omitted field and leaves out absent ids', async () => {
+    const request = mockRequest([
+      { id: 1, hypes: 4, total_rating_count: 20 },
+      { id: 2, total_rating_count: 7 },
+      { id: 3 }
+    ])
+
+    const result = await IGDBService.getPopularityByIds([1, 2, 3, 4, 1])
+
+    expect(result.get(1)).toEqual({ hypes: 4, totalRatingCount: 20 })
+    expect(result.get(2)).toEqual({ hypes: 0, totalRatingCount: 7 })
+    expect(result.get(3)).toEqual({ hypes: 0, totalRatingCount: 0 })
+    expect(result.has(4)).toBe(false)
+    expect(request).toHaveBeenCalledWith(
+      'games',
+      expect.stringMatching(/fields id,hypes,total_rating_count;/)
+    )
+  })
+
+  it('getPopularityByIds does not call IGDB without ids', async () => {
+    const request = mockRequest([])
+
+    expect((await IGDBService.getPopularityByIds([])).size).toBe(0)
     expect(request).not.toHaveBeenCalled()
   })
 })

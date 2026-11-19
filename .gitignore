@@ -15,6 +15,7 @@ backfill-console-*.json
 backfill-release-dates-*.csv
 backfill-release-precision-*.csv
 backfill-cover-urls-*.jsonl
+sync-popular-*.jsonl
 backfill-steam-wishlist-dates-*.jsonl
 
 src/generated

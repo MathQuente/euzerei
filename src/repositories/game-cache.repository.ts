@@ -6,10 +6,22 @@ import { GAME_STATUS } from '../utils/game-status'
 import { isUniqueViolation } from '../utils/prisma-errors'
 import { slugCandidates, uniqueSlug } from '../utils/game-slug'
 import type { ReleasePrecision } from '../utils/release-precision'
+import { MIN_HYPES, MIN_TOTAL_RATING_COUNT } from '../utils/catalog-popularity'
 
-const MIN_TOTAL_RATING_COUNT = 10
-const MIN_HYPES = 5
 const HIDDEN_STATUS_IDS = [GAME_STATUS.CANCELLED, GAME_STATUS.RUMORED]
+
+export function catalogPopularityWhere(): Prisma.GameCacheWhereInput {
+  return {
+    OR: [
+      { totalRatingCount: { gte: MIN_TOTAL_RATING_COUNT } },
+      { hypes: { gte: MIN_HYPES } }
+    ]
+  }
+}
+
+export function catalogPopularitySql() {
+  return Prisma.sql`(gc.total_rating_count >= ${MIN_TOTAL_RATING_COUNT} OR gc.hypes >= ${MIN_HYPES})`
+}
 
 export function catalogVisibilityWhere(): Prisma.GameCacheWhereInput {
   return {
@@ -80,15 +92,7 @@ export class GameCacheRepository {
     }
 
     const where: Prisma.GameCacheWhereInput = {
-      AND: [
-        {
-          OR: [
-            { totalRatingCount: { gte: MIN_TOTAL_RATING_COUNT } },
-            { hypes: { gte: MIN_HYPES } }
-          ]
-        },
-        catalogVisibilityWhere()
-      ],
+      AND: [catalogPopularityWhere(), catalogVisibilityWhere()],
       ...(query ? { name: { contains: query, mode: 'insensitive' } } : {})
     }
 
@@ -132,7 +136,7 @@ export class GameCacheRepository {
     offset: number
     query: string
   }) {
-    const where = Prisma.sql`WHERE (gc.total_rating_count >= ${MIN_TOTAL_RATING_COUNT} OR gc.hypes >= ${MIN_HYPES}) AND ${catalogVisibilitySql()} AND ${relevanceMatchSql(query)}`
+    const where = Prisma.sql`WHERE ${catalogPopularitySql()} AND ${catalogVisibilitySql()} AND ${relevanceMatchSql(query)}`
 
     const [games, countResult] = await Promise.all([
       prisma.$queryRaw<
@@ -195,7 +199,7 @@ export class GameCacheRepository {
     const nameFilter = query
       ? Prisma.sql`AND gc.name ILIKE ${`%${query}%`}`
       : Prisma.empty
-    const where = Prisma.sql`WHERE (gc.total_rating_count >= ${MIN_TOTAL_RATING_COUNT} OR gc.hypes >= ${MIN_HYPES}) AND ${catalogVisibilitySql()} ${nameFilter}`
+    const where = Prisma.sql`WHERE ${catalogPopularitySql()} AND ${catalogVisibilitySql()} ${nameFilter}`
 
     const [games, countResult] = await Promise.all([
       prisma.$queryRaw<
@@ -709,6 +713,167 @@ export class GameCacheRepository {
       WHERE gc.igdb_id = v.id
         AND gc.cover_url IS NOT DISTINCT FROM v.next
     `)
+  }
+
+  async findPopularityByIds(
+    ids: number[]
+  ): Promise<
+    Map<number, { hypes: number | null; totalRatingCount: number | null }>
+  > {
+    const found = new Map<
+      number,
+      { hypes: number | null; totalRatingCount: number | null }
+    >()
+    for (let i = 0; i < ids.length; i += 5000) {
+      const rows = await prisma.gameCache.findMany({
+        where: { igdbId: { in: ids.slice(i, i + 5000) } },
+        select: { igdbId: true, hypes: true, totalRatingCount: true }
+      })
+      for (const row of rows) {
+        found.set(row.igdbId, {
+          hypes: row.hypes,
+          totalRatingCount: row.totalRatingCount
+        })
+      }
+    }
+    return found
+  }
+
+  async findPopularIdsAfter(afterId: number, limit: number): Promise<number[]> {
+    const rows = await prisma.gameCache.findMany({
+      where: { igdbId: { gt: afterId }, AND: [catalogPopularityWhere()] },
+      orderBy: { igdbId: 'asc' },
+      take: limit,
+      select: { igdbId: true }
+    })
+    return rows.map(r => r.igdbId)
+  }
+
+  async updatePopularity(
+    updates: Array<{ igdbId: number; hypes: number; totalRatingCount: number }>
+  ): Promise<number> {
+    if (updates.length === 0) return 0
+    const invalid = updates.find(
+      u =>
+        !Number.isInteger(u.hypes) ||
+        u.hypes < 0 ||
+        !Number.isInteger(u.totalRatingCount) ||
+        u.totalRatingCount < 0
+    )
+    if (invalid) {
+      throw new Error(`Invalid popularity values for ${invalid.igdbId}`)
+    }
+    const rows = JSON.stringify(
+      updates.map(u => ({
+        id: u.igdbId,
+        hypes: u.hypes,
+        total_rating_count: u.totalRatingCount
+      }))
+    )
+    return prisma.$executeRaw(Prisma.sql`
+      UPDATE games_cache gc
+      SET hypes = v.hypes, total_rating_count = v.total_rating_count
+      FROM jsonb_to_recordset(${rows}::jsonb) AS v(id int, hypes int, total_rating_count int)
+      WHERE gc.igdb_id = v.id
+        AND (gc.hypes IS DISTINCT FROM v.hypes
+          OR gc.total_rating_count IS DISTINCT FROM v.total_rating_count)
+    `)
+  }
+
+  async restorePopularity(
+    rows: Array<{
+      igdbId: number
+      previous: { hypes: number | null; totalRatingCount: number | null }
+      next: { hypes: number; totalRatingCount: number }
+    }>,
+    dryRun: boolean
+  ): Promise<number> {
+    if (rows.length === 0) return 0
+    const json = JSON.stringify(
+      rows.map(r => ({
+        id: r.igdbId,
+        previous_hypes: r.previous.hypes,
+        previous_trc: r.previous.totalRatingCount,
+        next_hypes: r.next.hypes,
+        next_trc: r.next.totalRatingCount
+      }))
+    )
+    const recordset = Prisma.sql`jsonb_to_recordset(${json}::jsonb) AS v(id int, previous_hypes int, previous_trc int, next_hypes int, next_trc int)`
+    if (dryRun) {
+      const counted = await prisma.$queryRaw<{ count: bigint }[]>(Prisma.sql`
+        SELECT count(*) AS count
+        FROM games_cache gc
+        JOIN ${recordset} ON gc.igdb_id = v.id
+        WHERE gc.hypes IS NOT DISTINCT FROM v.next_hypes
+          AND gc.total_rating_count IS NOT DISTINCT FROM v.next_trc
+      `)
+      return Number(counted[0]?.count ?? 0)
+    }
+    return prisma.$executeRaw(Prisma.sql`
+      UPDATE games_cache gc
+      SET hypes = v.previous_hypes, total_rating_count = v.previous_trc
+      FROM ${recordset}
+      WHERE gc.igdb_id = v.id
+        AND gc.hypes IS NOT DISTINCT FROM v.next_hypes
+        AND gc.total_rating_count IS NOT DISTINCT FROM v.next_trc
+    `)
+  }
+
+  async findReferencedIgdbIds(ids: number[]): Promise<Set<number>> {
+    const referenced = new Set<number>()
+    for (let i = 0; i < ids.length; i += 5000) {
+      const chunk = ids.slice(i, i + 5000)
+      const [libraries, ratings, reviews, favorites] = await Promise.all([
+        prisma.userGame.findMany({
+          where: { igdbId: { in: chunk } },
+          distinct: ['igdbId'],
+          select: { igdbId: true }
+        }),
+        prisma.rating.findMany({
+          where: { igdbId: { in: chunk } },
+          distinct: ['igdbId'],
+          select: { igdbId: true }
+        }),
+        prisma.review.findMany({
+          where: { igdbId: { in: chunk } },
+          distinct: ['igdbId'],
+          select: { igdbId: true }
+        }),
+        prisma.userFavoriteGame.findMany({
+          where: { igdbId: { in: chunk } },
+          distinct: ['igdbId'],
+          select: { igdbId: true }
+        })
+      ])
+      for (const row of [...libraries, ...ratings, ...reviews, ...favorites]) {
+        referenced.add(row.igdbId)
+      }
+    }
+    return referenced
+  }
+
+  async deleteUnreferencedCacheRows(
+    ids: number[],
+    dryRun: boolean
+  ): Promise<{ deleted: number; skipped: number[] }> {
+    const referenced = await this.findReferencedIgdbIds(ids)
+    const skipped = ids.filter(id => referenced.has(id))
+    let deleted = ids.length - skipped.length
+    if (!dryRun) {
+      deleted = 0
+      for (let i = 0; i < ids.length; i += 5000) {
+        const chunk = ids.slice(i, i + 5000)
+        deleted += await prisma.$executeRaw(Prisma.sql`
+          DELETE FROM games_cache gc
+          WHERE gc.igdb_id IN (${Prisma.join(chunk)})
+            AND NOT EXISTS (SELECT 1 FROM user_games x WHERE x.igdb_id = gc.igdb_id)
+            AND NOT EXISTS (SELECT 1 FROM ratings x WHERE x.igdb_id = gc.igdb_id)
+            AND NOT EXISTS (SELECT 1 FROM reviews x WHERE x.igdb_id = gc.igdb_id)
+            AND NOT EXISTS (SELECT 1 FROM user_favorite_games x WHERE x.igdb_id = gc.igdb_id)
+        `)
+      }
+    }
+    return { deleted, skipped }
   }
 
   async updateGameModes(

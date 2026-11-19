@@ -3,6 +3,7 @@ import { IGDBGame } from '../types/igdb'
 import { fetchWithTimeout } from '../utils/fetch-with-timeout'
 import { GAME_STATUS, isHiddenFromCatalog } from '../utils/game-status'
 import { releaseDatePrecision } from '../utils/release-precision'
+import { MIN_HYPES, MIN_TOTAL_RATING_COUNT } from '../utils/catalog-popularity'
 
 const EROTIC_THEME_ID = 42
 
@@ -13,6 +14,9 @@ export const EROTIC_EXCEPTION_IDS = [
 ]
 const EROTIC_EXCEPTION_LIST = EROTIC_EXCEPTION_IDS.join(',')
 const EXCLUDE_EROTIC = `(themes != (${EROTIC_THEME_ID}) | id = (${EROTIC_EXCEPTION_LIST}))`
+
+const CACHE_FIELDS =
+  'id,name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,release_dates.date,release_dates.date_format,hypes,total_rating_count,category,game_type,parent_game,game_status'
 
 // IGDB registers an edition or version ("GTA VI: Ultimate Edition") as another
 // game with the same date and a version_parent. Used only by coming soon: in
@@ -203,8 +207,8 @@ export class IGDBService {
     })
   }
 
-  static readonly MIN_HYPES = 5
-  static readonly MIN_TOTAL_RATING_COUNT = 10
+  static readonly MIN_HYPES = MIN_HYPES
+  static readonly MIN_TOTAL_RATING_COUNT = MIN_TOTAL_RATING_COUNT
 
   static getReleaseCutoffEpoch(): number {
     const [year, month, day] = new Date()
@@ -345,7 +349,7 @@ export class IGDBService {
   ): Promise<IGDBGame[]> {
     return this.request(
       'games',
-      `fields id,name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,release_dates.date,release_dates.date_format,hypes,total_rating_count,category,game_type,parent_game,game_status; where id > ${lastId} & cover != null & ${EXCLUDE_EROTIC}; sort id asc; limit ${limit};`
+      `fields ${CACHE_FIELDS}; where id > ${lastId} & cover != null & ${EXCLUDE_EROTIC}; sort id asc; limit ${limit};`
     )
   }
 
@@ -356,8 +360,46 @@ export class IGDBService {
   ): Promise<IGDBGame[]> {
     return this.request(
       'games',
-      `fields id,name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,release_dates.date,release_dates.date_format,hypes,total_rating_count,category,game_type,parent_game,game_status; where id > ${lastId} & id <= ${maxId} & cover != null & ${EXCLUDE_EROTIC} & parent_game != null; sort id asc; limit ${limit};`
+      `fields ${CACHE_FIELDS}; where id > ${lastId} & id <= ${maxId} & cover != null & ${EXCLUDE_EROTIC} & parent_game != null; sort id asc; limit ${limit};`
     )
+  }
+
+  static async fetchPopularForSync(
+    lastId: number,
+    limit: number
+  ): Promise<IGDBGame[]> {
+    return this.request(
+      'games',
+      `fields ${CACHE_FIELDS}; where id > ${lastId} & cover != null & ${EXCLUDE_EROTIC} & (total_rating_count >= ${MIN_TOTAL_RATING_COUNT} | hypes >= ${MIN_HYPES}); sort id asc; limit ${limit};`
+    )
+  }
+
+  static async getPopularityByIds(
+    ids: number[]
+  ): Promise<Map<number, { hypes: number; totalRatingCount: number }>> {
+    const unique = [...new Set(ids)]
+    const popularity = new Map<
+      number,
+      { hypes: number; totalRatingCount: number }
+    >()
+
+    for (let i = 0; i < unique.length; i += this.EXTERNAL_GAMES_BATCH_SIZE) {
+      const chunk = unique.slice(i, i + this.EXTERNAL_GAMES_BATCH_SIZE)
+      const results = await this.request<
+        { id: number; hypes?: number; total_rating_count?: number }[]
+      >(
+        'games',
+        `where id = (${chunk.join(',')}); fields id,hypes,total_rating_count; limit ${chunk.length};`
+      )
+      for (const row of results) {
+        popularity.set(row.id, {
+          hypes: row.hypes ?? 0,
+          totalRatingCount: row.total_rating_count ?? 0
+        })
+      }
+    }
+
+    return popularity
   }
 
   static async fetchEroticIds(
