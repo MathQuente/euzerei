@@ -24,7 +24,8 @@ export const IGDBGameSchema = z.object({
       igdbId: z.number(),
       slug: z.string().nullable().optional(),
       name: z.string(),
-      coverUrl: z.string().nullable()
+      coverUrl: z.string().nullable(),
+      platforms: z.array(z.string()).optional()
     })
     .optional(),
   releaseDates: z

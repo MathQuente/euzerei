@@ -17,7 +17,14 @@ export interface IGDBGame {
   first_release_date?: number
   category?: number
   game_type?: number
-  parent_game?: number | { id: number; name: string; cover?: { url: string } }
+  parent_game?:
+    | number
+    | {
+        id: number
+        name: string
+        cover?: { url: string }
+        platforms?: { name: string }[]
+      }
   rating?: number
   follows?: number
   hypes?: number

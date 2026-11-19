@@ -20,6 +20,7 @@
     "seed:demo": "tsx --env-file .env prisma/seed-demo.ts",
     "sync:igdb": "tsx --env-file .env src/scripts/sync-igdb.ts",
     "sync:popular": "tsx --env-file .env src/scripts/sync-popular.ts",
+    "backfill:alternative-names": "tsx --env-file .env src/scripts/backfill-alternative-names.ts",
     "backfill:hypes": "tsx --env-file .env src/scripts/backfill-hypes.ts",
     "backfill:total-rating-count": "tsx --env-file .env src/scripts/backfill-total-rating-count.ts",
     "backfill:missing-content": "tsx --env-file .env src/scripts/backfill-missing-content.ts",

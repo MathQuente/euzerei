@@ -16,7 +16,7 @@ const EROTIC_EXCEPTION_LIST = EROTIC_EXCEPTION_IDS.join(',')
 const EXCLUDE_EROTIC = `(themes != (${EROTIC_THEME_ID}) | id = (${EROTIC_EXCEPTION_LIST}))`
 
 const CACHE_FIELDS =
-  'id,name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,release_dates.date,release_dates.date_format,hypes,total_rating_count,category,game_type,parent_game,game_status'
+  'id,name,alternative_names.name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,release_dates.date,release_dates.date_format,hypes,total_rating_count,category,game_type,parent_game,game_status'
 
 // IGDB registers an edition or version ("GTA VI: Ultimate Edition") as another
 // game with the same date and a version_parent. Used only by coming soon: in
@@ -143,12 +143,37 @@ export class IGDBService {
     return g.game_type ?? g.category ?? -1
   }
 
+  static joinAlternativeNames(names: { name: string }[] | undefined) {
+    const unique = [...new Set((names ?? []).map(n => n.name.trim()))].filter(
+      Boolean
+    )
+    return unique.length > 0 ? unique.join(' | ') : null
+  }
+
+  static async getAlternativeNamesByIds(
+    ids: number[]
+  ): Promise<Map<number, string | null>> {
+    const result = new Map<number, string | null>()
+    if (ids.length === 0) return result
+    const rows = await this.request<
+      { id: number; alternative_names?: { name: string }[] }[]
+    >(
+      'games',
+      `where id = (${ids.join(',')}); fields id,alternative_names.name; limit ${Math.min(ids.length, 500)};`
+    )
+    for (const row of rows) {
+      result.set(row.id, this.joinAlternativeNames(row.alternative_names))
+    }
+    return result
+  }
+
   static toGameCacheInput(g: IGDBGame) {
     const releaseDate =
       this.toCacheReleaseDate(g.first_release_date) ?? undefined
     return {
       igdbId: g.id,
       name: g.name,
+      alternativeNames: this.joinAlternativeNames(g.alternative_names),
       coverUrl: this.formatCoverUrl(g.cover?.url),
       summary: g.summary,
       genres: g.genres?.map(x => x.name) ?? [],
@@ -221,15 +246,19 @@ export class IGDBService {
   static async getGameById(igdbId: number): Promise<IGDBGame | null> {
     const results = await this.request<IGDBGame[]>(
       'games',
-      `where id = ${igdbId}; fields id,name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,category,game_type,parent_game.id,parent_game.name,parent_game.cover.url,rating,follows,similar_games,game_status,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,release_dates.date,release_dates.date_format,release_dates.platform.name,screenshots.image_id,screenshots.width,screenshots.height,videos.video_id,videos.name; limit 1;`
+      `where id = ${igdbId}; fields id,name,alternative_names.name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,category,game_type,parent_game.id,parent_game.name,parent_game.cover.url,parent_game.platforms.name,rating,follows,similar_games,game_status,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,release_dates.date,release_dates.date_format,release_dates.platform.name,screenshots.image_id,screenshots.width,screenshots.height,videos.video_id,videos.name; limit 1;`
     )
     return results[0] ?? null
   }
 
+  static readonly E_READER_PLATFORM_ID = 510
+  static readonly PORT_GAME_TYPE = 11
+  static readonly PACK_GAME_TYPE = 13
+
   static async getRelatedGames(igdbId: number): Promise<IGDBGame[]> {
     const games = await this.request<IGDBGame[]>(
       'games',
-      `where parent_game = ${igdbId} & game_type != (5,12); fields id,name,cover.url,category,game_type,parent_game,first_release_date,rating,game_status; sort first_release_date asc; limit 50;`
+      `where parent_game = ${igdbId} & game_type != (5,12) & (cover != null | game_type != ${this.PACK_GAME_TYPE}) & (platforms != (${this.E_READER_PLATFORM_ID}) | game_type = ${this.PORT_GAME_TYPE}); fields id,name,cover.url,category,game_type,parent_game,first_release_date,rating,game_status; sort first_release_date asc; limit 50;`
     )
 
     return games.filter(

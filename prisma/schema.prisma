@@ -263,6 +263,7 @@ model GameCache {
   summary              String?
   genres               String[]
   platforms            String[]
+  alternativeNames     String?   @map("alternative_names")
   releaseDate          Int?      @map("release_date")
   releaseDatePrecision String?   @map("release_date_precision")
   hypes                Int?      @map("hypes")

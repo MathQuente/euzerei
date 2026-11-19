@@ -214,6 +214,13 @@ describe('GameService.findGameById slug', () => {
     expect(game.slug).toBe('doom')
   })
 
+  it('returns genres and platforms as empty lists when IGDB sends none', async () => {
+    const { service } = detailSetup(new Map())
+    const { game } = await service.findGameById(5)
+    expect(game.genres).toEqual([])
+    expect(game.platforms).toEqual([])
+  })
+
   it('returns a null slug and never writes to games_cache for an uncached game', async () => {
     const { service, upsertMany } = detailSetup(new Map())
     const { game } = await service.findGameById(5)

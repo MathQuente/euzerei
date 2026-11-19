@@ -6,6 +6,7 @@ import {
   catalogVisibilityWhere,
   escapeLike,
   normalizeSearchTerm,
+  catalogKindSql,
   relevanceMatchSql,
   relevanceOrderSql
 } from './game-cache.repository'
@@ -83,13 +84,22 @@ describe('escapeLike', () => {
 })
 
 describe('relevanceMatchSql', () => {
-  it('folds case and accents on both sides and escapes the term', () => {
+  it('matches the name or the alternative names, folded and escaped', () => {
     const fragment = relevanceMatchSql('50%')
 
     expect(fragment.sql).toBe(
-      "unaccent(lower(gc.name)) LIKE unaccent(lower(?)) ESCAPE '\\'"
+      "(unaccent(lower(gc.name)) LIKE unaccent(lower(?)) ESCAPE '\\' OR unaccent(lower(coalesce(gc.alternative_names, ''))) LIKE unaccent(lower(?)) ESCAPE '\\')"
     )
-    expect(fragment.values).toEqual(['%50\\%%'])
+    expect(fragment.values).toEqual(['%50\\%%', '%50\\%%'])
+  })
+})
+
+describe('catalogKindSql', () => {
+  it('keeps unknown categories and drops mods', () => {
+    const fragment = catalogKindSql()
+
+    expect(fragment.sql).toBe('(gc.category IS NULL OR gc.category <> ?)')
+    expect(fragment.values).toEqual([5])
   })
 })
 

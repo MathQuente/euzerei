@@ -319,6 +319,30 @@ describe('IGDBService.isEndlessFranchise', () => {
   })
 })
 
+describe('IGDBService.joinAlternativeNames', () => {
+  it('joins unique trimmed names and returns null when there are none', () => {
+    expect(
+      IGDBService.joinAlternativeNames([
+        { name: 'FIFA 13: World Class Soccer' },
+        { name: ' FIFA 13: World Class Soccer ' },
+        { name: '' }
+      ])
+    ).toBe('FIFA 13: World Class Soccer')
+    expect(IGDBService.joinAlternativeNames([])).toBeNull()
+    expect(IGDBService.joinAlternativeNames(undefined)).toBeNull()
+  })
+
+  it('stores them on the cache input', () => {
+    expect(
+      IGDBService.toGameCacheInput({
+        id: 1,
+        name: 'Some Game',
+        alternative_names: [{ name: 'Some Alias' }]
+      } as IGDBGame).alternativeNames
+    ).toBe('Some Alias')
+  })
+})
+
 describe('IGDBService.toGameCacheInput', () => {
   it('stores how exact the release date is, from release_dates', () => {
     const YEAR_END = 1798675200 // 2026-12-31
@@ -708,6 +732,30 @@ describe('IGDBService detail queries request game_type', () => {
     expect(request).toHaveBeenCalledWith(
       'games',
       expect.stringMatching(/fields [^;]*game_type/)
+    )
+  })
+
+  it('getRelatedGames asks for a cover only on packs', async () => {
+    const request = mockRequest([])
+
+    await IGDBService.getRelatedGames(1)
+
+    expect(request).toHaveBeenCalledWith(
+      'games',
+      expect.stringMatching(/\(cover != null \| game_type != 13\)/)
+    )
+  })
+
+  it('getRelatedGames leaves out e-Reader cards but keeps e-Reader ports', async () => {
+    const request = mockRequest([])
+
+    await IGDBService.getRelatedGames(1)
+
+    expect(request).toHaveBeenCalledWith(
+      'games',
+      expect.stringMatching(
+        /where [^;]*\(platforms != \(510\) \| game_type = 11\)/
+      )
     )
   })
 

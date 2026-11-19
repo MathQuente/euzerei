@@ -33,6 +33,16 @@ export function catalogVisibilityWhere(): Prisma.GameCacheWhereInput {
   }
 }
 
+const MOD_CATEGORY = 5
+
+export function catalogKindWhere(): Prisma.GameCacheWhereInput {
+  return { OR: [{ category: null }, { category: { not: MOD_CATEGORY } }] }
+}
+
+export function catalogKindSql() {
+  return Prisma.sql`(gc.category IS NULL OR gc.category <> ${MOD_CATEGORY})`
+}
+
 export function catalogVisibilitySql() {
   return Prisma.sql`(gc.game_status IS NULL OR gc.game_status NOT IN (${Prisma.join(HIDDEN_STATUS_IDS)}) OR (gc.game_status = ${GAME_STATUS.CANCELLED} AND gc.release_date IS NOT NULL))`
 }
@@ -47,8 +57,11 @@ export function escapeLike(term: string) {
 
 const FOLDED_NAME = Prisma.sql`unaccent(lower(gc.name))`
 
+const FOLDED_ALTERNATIVE_NAMES = Prisma.sql`unaccent(lower(coalesce(gc.alternative_names, '')))`
+
 export function relevanceMatchSql(query: string) {
-  return Prisma.sql`${FOLDED_NAME} LIKE unaccent(lower(${`%${escapeLike(query)}%`})) ESCAPE '\\'`
+  const pattern = `%${escapeLike(query)}%`
+  return Prisma.sql`(${FOLDED_NAME} LIKE unaccent(lower(${pattern})) ESCAPE '\\' OR ${FOLDED_ALTERNATIVE_NAMES} LIKE unaccent(lower(${pattern})) ESCAPE '\\')`
 }
 
 export function relevanceOrderSql(query: string) {
@@ -112,8 +125,19 @@ export class GameCacheRepository {
     }
 
     const where: Prisma.GameCacheWhereInput = {
-      AND: [catalogPopularityWhere(), catalogVisibilityWhere()],
-      ...(query ? { name: { contains: query, mode: 'insensitive' } } : {}),
+      AND: [
+        catalogPopularityWhere(),
+        catalogVisibilityWhere(),
+        catalogKindWhere()
+      ],
+      ...(query
+        ? {
+            OR: [
+              { name: { contains: query, mode: 'insensitive' } },
+              { alternativeNames: { contains: query, mode: 'insensitive' } }
+            ]
+          }
+        : {}),
       ...(platformNames.length > 0
         ? { platforms: { hasSome: platformNames } }
         : {})
@@ -161,7 +185,7 @@ export class GameCacheRepository {
     query: string
     platformNames: string[]
   }) {
-    const where = Prisma.sql`WHERE ${catalogPopularitySql()} AND ${catalogVisibilitySql()} AND ${relevanceMatchSql(query)} ${platformSql(platformNames)}`
+    const where = Prisma.sql`WHERE ${catalogPopularitySql()} AND ${catalogVisibilitySql()} AND ${catalogKindSql()} AND ${relevanceMatchSql(query)} ${platformSql(platformNames)}`
 
     const [games, countResult] = await Promise.all([
       prisma.$queryRaw<
@@ -224,9 +248,9 @@ export class GameCacheRepository {
   }) {
     const direction = sortOrder === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`
     const nameFilter = query
-      ? Prisma.sql`AND gc.name ILIKE ${`%${query}%`}`
+      ? Prisma.sql`AND (gc.name ILIKE ${`%${query}%`} OR gc.alternative_names ILIKE ${`%${query}%`})`
       : Prisma.empty
-    const where = Prisma.sql`WHERE ${catalogPopularitySql()} AND ${catalogVisibilitySql()} ${nameFilter} ${platformSql(platformNames)}`
+    const where = Prisma.sql`WHERE ${catalogPopularitySql()} AND ${catalogVisibilitySql()} AND ${catalogKindSql()} ${nameFilter} ${platformSql(platformNames)}`
 
     const [games, countResult] = await Promise.all([
       prisma.$queryRaw<
@@ -281,6 +305,7 @@ export class GameCacheRepository {
     games: Array<{
       igdbId: number
       name: string
+      alternativeNames?: string | null
       coverUrl: string | null
       summary?: string
       genres: string[]
@@ -299,6 +324,7 @@ export class GameCacheRepository {
       data: games.map(g => ({
         igdbId: g.igdbId,
         name: g.name,
+        alternativeNames: g.alternativeNames ?? null,
         coverUrl: g.coverUrl,
         summary: g.summary ?? null,
         genres: g.genres,
@@ -975,6 +1001,31 @@ export class GameCacheRepository {
       select: { igdbId: true }
     })
     return rows.map(r => r.igdbId)
+  }
+
+  async findIdsAfter(afterId: number, limit: number): Promise<number[]> {
+    const rows = await prisma.gameCache.findMany({
+      where: { igdbId: { gt: afterId } },
+      orderBy: { igdbId: 'asc' },
+      take: limit,
+      select: { igdbId: true }
+    })
+    return rows.map(r => r.igdbId)
+  }
+
+  async updateAlternativeNames(
+    updates: Array<{ igdbId: number; alternativeNames: string | null }>
+  ) {
+    const rows = updates.filter(u => u.alternativeNames !== null)
+    if (rows.length === 0) return
+    await prisma.$executeRaw`
+      UPDATE games_cache AS gc
+      SET alternative_names = v.names
+      FROM jsonb_to_recordset(${JSON.stringify(
+        rows.map(u => ({ id: u.igdbId, names: u.alternativeNames }))
+      )}::jsonb) AS v(id int, names text)
+      WHERE gc.igdb_id = v.id
+    `
   }
 
   async updateHypes(updates: Array<{ igdbId: number; hypes: number }>) {

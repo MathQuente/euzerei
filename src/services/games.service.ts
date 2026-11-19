@@ -19,6 +19,7 @@ import {
 
 const TRENDING_WINDOW_DAYS = 30
 const GAME_CACHE_TTL_SECONDS = 60 * 60
+const GAME_DETAIL_CACHE_VERSION = 2
 const RECENT_FEATURED_LIMIT = 9
 
 // The released/coming-soon split changes at midnight in Brazil. The day of the
@@ -57,7 +58,8 @@ export class GameService {
             igdbId: game.parent_game.id,
             slug: slugs.get(game.parent_game.id) ?? null,
             name: game.parent_game.name,
-            coverUrl: IGDBService.formatCoverUrl(game.parent_game.cover?.url)
+            coverUrl: IGDBService.formatCoverUrl(game.parent_game.cover?.url),
+            platforms: game.parent_game.platforms?.map(p => p.name)
           }
         : undefined
 
@@ -94,8 +96,8 @@ export class GameService {
       name: game.name,
       coverUrl: IGDBService.formatCoverUrl(game.cover?.url),
       summary: game.summary,
-      genres: game.genres?.map(g => g.name),
-      platforms: game.platforms?.map(p => p.name),
+      genres: game.genres?.map(g => g.name) ?? [],
+      platforms: game.platforms?.map(p => p.name) ?? [],
       releaseDate: game.first_release_date,
       releaseDatePrecision: releaseDatePrecision(
         game.first_release_date,
@@ -202,7 +204,7 @@ export class GameService {
   }
 
   async findGameById(igdbId: number) {
-    const key = `game:${igdbId}`
+    const key = `game:v${GAME_DETAIL_CACHE_VERSION}:${igdbId}`
 
     const cached = await this.cacheRepository.get(key)
 

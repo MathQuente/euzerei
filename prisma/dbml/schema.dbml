@@ -168,6 +168,7 @@ Table games_cache {
   summary String
   genres String[] [not null]
   platforms String[] [not null]
+  alternativeNames String
   releaseDate Int
   releaseDatePrecision String
   hypes Int
