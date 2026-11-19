@@ -477,9 +477,9 @@ export class UserRepository {
                 : sortBy === 'lastPlayedAt'
                   ? Prisma.sql`ug.last_played_at ${direction} NULLS LAST, ug.created_at ${direction}`
                   : sortBy === 'droppedAt'
-                  ? // Jogo que não está em Larguei não tem a data: vale a de adição.
-                    Prisma.sql`CASE WHEN ugs.status = 'DROPPED' THEN COALESCE(ug.dropped_at, ug.updated_at) ELSE ug.created_at END ${direction}`
-                  : Prisma.sql`ug.created_at ${direction}`
+                    ? // Jogo que não está em Larguei não tem a data: vale a de adição.
+                      Prisma.sql`CASE WHEN ugs.status = 'DROPPED' THEN COALESCE(ug.dropped_at, ug.updated_at) ELSE ug.created_at END ${direction}`
+                    : Prisma.sql`ug.created_at ${direction}`
 
     const statusFilter = this.userGamesStatusFilter(filter)
     const queryFilter = this.userGamesQueryFilter(query)

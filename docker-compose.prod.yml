@@ -17,7 +17,14 @@ services:
   redis:
     image: redis:7
     restart: always
-    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    command:
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--maxmemory-policy',
+        'noeviction'
+      ]
     volumes:
       - redis_data:/data
     healthcheck:
