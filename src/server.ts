@@ -26,6 +26,7 @@ import { startXboxImportWorker } from './workers/xbox-import.worker'
 import closeWithGrace from 'close-with-grace'
 import { HealthRepository } from './repositories/health.repository'
 import { healthRoutes } from './routes/health'
+import { registerOriginGuard } from './origin-guard'
 import { shutdown } from './shutdown'
 import { sendProblem } from './utils/problem'
 
@@ -59,6 +60,7 @@ export class Server {
     this.setupZodTypeProvider()
     this.initErrorHandler()
     await this.initSecurityHeaders()
+    this.initOriginGuard()
 
     Jwt.initSetup(this.app)
 
@@ -188,6 +190,17 @@ export class Server {
         reply.header('Cache-Control', 'no-store')
       }
     })
+  }
+
+  private static initOriginGuard() {
+    const enabled = registerOriginGuard(this.app, {
+      secret: process.env.ORIGIN_SECRET
+    })
+    if (!enabled && process.env.NODE_ENV === 'production') {
+      console.warn(
+        'ORIGIN_SECRET is not set: the API accepts requests that skip the proxy.'
+      )
+    }
   }
 
   private static initErrorHandler() {

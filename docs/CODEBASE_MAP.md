@@ -83,6 +83,7 @@ src/
   server.ts        Fastify instance, plugins, rate limit, routes, starts the import workers
   jwt.ts           JWT + cookie + CORS plugins, authenticate / tryAuthenticate decorators
   error-handler.ts single global error handler
+  origin-guard.ts  optional onRequest hook: with `ORIGIN_SECRET` set, every route except `/health` needs the `x-origin-secret` header (403 otherwise)
   routes/          per-resource route registration (manual wiring), 10 files, 72 routes
   controllers/     parse Zod -> call service -> shape reply (exceptions listed under Gotchas)
   services/        business rules, cache-aside, external API clients
@@ -261,6 +262,7 @@ The `url` is no longer allowed in the `datasource` block of the schema. The Pris
 - **Login lockout** (`AuthService.validateUser`): failures are counted per email+IP (`login-failures:${hash(email)}:${hash(ip)}`, limit 10) and per email (`login-failures:${hash(email)}`, limit 50), both with a 15min window; either one over its limit answers 429 before bcrypt runs. The per-email limit only applies to unfamiliar IPs: a successful password login stores `login-familiar-ip:${hash(email)}:${hash(ip)}` for 30 days, and a familiar IP is checked and counted only against its own email+IP limit, so failures from elsewhere cannot lock it out. Success clears only the email+IP counter; a password reset clears both. A block is logged as `[Login] blocked` with the scope only.
 - **Sessions**: each login/OAuth sign-in creates its own refresh token row. Logout invalidates only the cookie's token; password reset and provider takeover call `revokeAllSessions`.
 - **`TRUST_PROXY`**: unset trusts no proxy. Behind a reverse proxy set the hop count (e.g. `1`) or the proxy IPs/CIDRs, otherwise rate limits see the proxy's IP for every client.
+- **`ORIGIN_SECRET`** (`src/origin-guard.ts`, at least 32 characters): in production the API is reachable both through the front's proxy (Vercel `routes` transform adds `x-origin-secret`) and directly at the Render URL. With `TRUST_PROXY=true` the API believes any `X-Forwarded-For`, so a direct caller could pick the IP the rate limit sees; the guard refuses calls that skip the proxy. Only `/health` is exempt, because the platform health check has no header. Unset, the guard is off (local development) and production logs a warning. The same value must be set as `ORIGIN_SECRET` in the Vercel project, otherwise Vercel sends the literal text `$ORIGIN_SECRET` and every call gets 403.
 
 ## Platform Imports (Steam, PlayStation, Xbox)
 
@@ -458,7 +460,7 @@ Reasons that are not visible in the code. The code has no explanatory comments; 
 
 ## Environment variables (names only, see `.env.example`)
 
-- Runtime: `NODE_ENV`, `PORT`, `TRUST_PROXY`, `SHUTDOWN_TIMEOUT_MS`, `FRONTEND_URL`
+- Runtime: `NODE_ENV`, `PORT`, `TRUST_PROXY`, `ORIGIN_SECRET`, `SHUTDOWN_TIMEOUT_MS`, `FRONTEND_URL`
 - Auth: `SECRET_JWT_KEY`
 - Database and Redis: `DATABASE_URL`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `REDIS_URL`
 - Google / Discord: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_OAUTH_CALLBACK_URL`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_OAUTH_CALLBACK_URL`
