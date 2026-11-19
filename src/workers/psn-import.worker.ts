@@ -1,5 +1,6 @@
 import { Worker } from 'bullmq'
 import { bullConnection } from '../queues/connection'
+import { IMPORT_WORKER_TUNING } from './worker-tuning'
 import {
   PSN_IMPORT_QUEUE_NAME,
   PsnImportJobData
@@ -54,7 +55,7 @@ export function startPsnImportWorker() {
         throw toImportJobError(err, GENERIC_IMPORT_ERROR)
       }
     },
-    { connection: bullConnection }
+    { connection: bullConnection, ...IMPORT_WORKER_TUNING }
   )
 
   worker.on('failed', (job, err) => {
