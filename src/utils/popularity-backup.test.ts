@@ -22,8 +22,22 @@ describe('popularity backup file', () => {
     expect(parsed.map(isInsertedRow)).toEqual([false, true])
   })
 
+  it('keeps a NULL counter of the previous row as NULL, so a restore is an exact revert', () => {
+    const rows = [
+      {
+        igdbId: 7,
+        previous: { hypes: null, totalRatingCount: 12 },
+        next: { hypes: 2, totalRatingCount: 12 }
+      }
+    ]
+
+    expect(parsePopularityBackup(formatPopularityBackup(rows))).toEqual(rows)
+  })
+
   it.each([
     ['not json', 'oops'],
+    ['the JSON literal null', 'null'],
+    ['a JSON number', '42'],
     ['a non-integer id', '{"igdbId":1.5,"inserted":true}'],
     ['an id of zero', '{"igdbId":0,"inserted":true}'],
     ['an insertion with extra fields', '{"igdbId":1,"inserted":true,"x":1}'],

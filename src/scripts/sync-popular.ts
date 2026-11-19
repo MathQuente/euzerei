@@ -37,19 +37,41 @@ const LABELS: Record<PopularityChangeKind, string> = {
 
 type CacheInput = ReturnType<typeof IGDBService.toGameCacheInput>
 
+type Counters = { hypes: number | null; totalRatingCount: number | null }
+type Values = { hypes: number; totalRatingCount: number }
+
 interface Change {
   igdbId: number
   name: string
   kind: PopularityChangeKind
   writes: boolean
-  previous: { hypes: number; totalRatingCount: number } | null
-  next: { hypes: number; totalRatingCount: number }
+  previous: Counters | null
+  next: Values
   insert?: CacheInput
+}
+
+function buildChange(
+  igdbId: number,
+  name: string,
+  cache: Counters | null,
+  igdb: Values,
+  insert?: CacheInput
+): Change {
+  const result = classifyPopularityChange({ cache, igdb })
+  return {
+    igdbId,
+    name,
+    kind: result.kind,
+    writes: result.writes,
+    previous: cache,
+    next: result.next,
+    insert: result.kind === 'inserir' ? insert : undefined
+  }
 }
 
 function describe(change: Change) {
   const from = change.previous
-    ? `${change.previous.totalRatingCount} aval./${change.previous.hypes} exp.`
+    ? `${change.previous.totalRatingCount ?? 0} aval./${change.previous.hypes ?? 0} exp.`
     : 'sem linha'
   const to = `${change.next.totalRatingCount} aval./${change.next.hypes} exp.`
   return `${change.igdbId} ${change.name.slice(0, 40)}: ${from} -> ${to} [${change.kind}]`
@@ -119,7 +141,8 @@ async function main() {
       change.previous &&
       change.next.hypes === 0 &&
       change.next.totalRatingCount === 0 &&
-      (change.previous.hypes > 0 || change.previous.totalRatingCount > 0)
+      ((change.previous.hypes ?? 0) > 0 ||
+        (change.previous.totalRatingCount ?? 0) > 0)
     ) {
       zeroed++
     }
@@ -138,28 +161,15 @@ async function main() {
     for (const game of games) {
       upstreamIds.add(game.id)
       const input = IGDBService.toGameCacheInput(game)
-      const cache = existing.get(game.id) ?? null
-      const result = classifyPopularityChange({
-        cache,
-        igdb: {
-          hypes: input.hypes,
-          totalRatingCount: input.totalRatingCount
-        }
-      })
-      record({
-        igdbId: game.id,
-        name: game.name,
-        kind: result.kind,
-        writes: result.writes,
-        previous: cache
-          ? {
-              hypes: cache.hypes ?? 0,
-              totalRatingCount: cache.totalRatingCount ?? 0
-            }
-          : null,
-        next: result.next,
-        insert: result.kind === 'inserir' ? input : undefined
-      })
+      record(
+        buildChange(
+          game.id,
+          game.name,
+          existing.get(game.id) ?? null,
+          { hypes: input.hypes, totalRatingCount: input.totalRatingCount },
+          input
+        )
+      )
     }
 
     lastId = games[games.length - 1].id
@@ -180,38 +190,28 @@ async function main() {
     const missingUpstream = page.filter(id => !upstreamIds.has(id))
     if (missingUpstream.length === 0) continue
 
-    const current = await withRetry(() =>
-      IGDBService.getPopularityByIds(missingUpstream)
-    )
     const existing = await repo.findPopularityByIds(missingUpstream)
-    for (const id of missingUpstream) {
-      const igdb = current.get(id)
-      if (!igdb) {
-        notReturned++
-        continue
+    for (let i = 0; i < missingUpstream.length; i += BATCH_SIZE) {
+      const chunk = missingUpstream.slice(i, i + BATCH_SIZE)
+      const current = await withRetry(() =>
+        IGDBService.getPopularityByIds(chunk)
+      )
+      for (const id of chunk) {
+        const igdb = current.get(id)
+        if (!igdb) {
+          notReturned++
+          continue
+        }
+        revisited++
+        record(buildChange(id, `jogo ${id}`, existing.get(id) ?? null, igdb))
       }
-      revisited++
-      const cache = existing.get(id) ?? null
-      const result = classifyPopularityChange({ cache, igdb })
-      record({
-        igdbId: id,
-        name: `jogo ${id}`,
-        kind: result.kind,
-        writes: result.writes,
-        previous: cache
-          ? {
-              hypes: cache.hypes ?? 0,
-              totalRatingCount: cache.totalRatingCount ?? 0
-            }
-          : null,
-        next: result.next
-      })
+      await sleep(DELAY_MS)
     }
   }
 
   changes.sort((a, b) => a.igdbId - b.igdbId)
   console.log(
-    `\n\nPopulares no IGDB: ${upstreamIds.size} | visíveis do cache fora do conjunto, reconferidos: ${revisited} | não retornados: ${notReturned}`
+    `\n\nPopulares no IGDB: ${upstreamIds.size} | populares do cache fora do conjunto, reconferidos: ${revisited} | não retornados: ${notReturned}`
   )
   for (const [kind, label] of Object.entries(LABELS)) {
     console.log(
@@ -246,7 +246,25 @@ async function main() {
     return
   }
 
-  const backupRows: PopularityBackupRow[] = toApply.map(change =>
+  const insertCandidates = toApply.filter(c => c.kind === 'inserir')
+  const createdMeanwhile = await repo.findPopularityByIds(
+    insertCandidates.map(c => c.igdbId)
+  )
+  const finalApply = toApply.filter(
+    c => !(c.kind === 'inserir' && createdMeanwhile.has(c.igdbId))
+  )
+  if (createdMeanwhile.size > 0) {
+    console.log(
+      `\n${createdMeanwhile.size} jogos foram criados por outro processo depois da leitura e ficam de fora desta rodada.`
+    )
+  }
+  if (finalApply.length === 0) {
+    console.log('\nNada a gravar.')
+    await prisma.$disconnect()
+    return
+  }
+
+  const backupRows: PopularityBackupRow[] = finalApply.map(change =>
     change.kind === 'inserir' || change.previous === null
       ? { igdbId: change.igdbId, inserted: true as const }
       : { igdbId: change.igdbId, previous: change.previous, next: change.next }
@@ -259,15 +277,24 @@ async function main() {
   writeBackupFile(backupFile, formatPopularityBackup(backupRows) + '\n')
   console.log(`\nBackup gravado: ${backupFile} (${backupRows.length} linhas).`)
 
-  const inserts = toApply.filter(c => c.kind === 'inserir' && c.insert)
+  const inserts = finalApply.filter(c => c.kind === 'inserir' && c.insert)
   for (let i = 0; i < inserts.length; i += BATCH_SIZE) {
     await repo.upsertMany(
       inserts.slice(i, i + BATCH_SIZE).map(c => c.insert as CacheInput)
     )
   }
-  const confirmed = await repo.findPopularityByIds(inserts.map(c => c.igdbId))
+  const confirmedIds = [
+    ...(await repo.findPopularityByIds(inserts.map(c => c.igdbId))).keys()
+  ]
+  let withSlug = await repo.findSlugsByIds(confirmedIds)
+  let withoutSlug = confirmedIds.filter(id => !withSlug.has(id))
+  if (withoutSlug.length > 0) {
+    await repo.assignMissingSlugs(withoutSlug)
+    withSlug = await repo.findSlugsByIds(withoutSlug)
+    withoutSlug = withoutSlug.filter(id => !withSlug.has(id))
+  }
 
-  const updates = toApply.filter(c => c.kind !== 'inserir')
+  const updates = finalApply.filter(c => c.kind !== 'inserir')
   let updated = 0
   for (let i = 0; i < updates.length; i += BATCH_SIZE) {
     updated += await repo.updatePopularity(
@@ -280,7 +307,7 @@ async function main() {
   }
 
   console.log(
-    `Inseridas ${confirmed.size} de ${inserts.length} (com slug gerado pelo upsertMany); atualizadas ${updated} de ${updates.length}.`
+    `Inseridas ${confirmedIds.length} de ${inserts.length}; sem slug depois de uma nova tentativa: ${withoutSlug.length}${withoutSlug.length > 0 ? ` (${withoutSlug.slice(0, 20).join(',')})` : ''}; atualizadas ${updated} de ${updates.length}.`
   )
   console.log(`Para desfazer: npm run sync:popular -- --restore ${backupFile}`)
   await prisma.$disconnect()

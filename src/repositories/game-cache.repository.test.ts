@@ -553,12 +553,10 @@ describe('GameCacheRepository popularity writes', () => {
     ['a review', { review: [2] }],
     ['a favorite', { favorite: [2] }]
   ])(
-    'deleteUnreferencedCacheRows skips a row used by %s and deletes the free ones',
+    'deleteUnreferencedCacheRows reports a row used by %s as skipped and deletes with a single guarded statement',
     async (_label, refs) => {
       mockReferences(refs)
-      const deleteMany = vi
-        .spyOn(prisma.gameCache, 'deleteMany')
-        .mockResolvedValue({ count: 2 })
+      const execute = vi.spyOn(prisma, '$executeRaw').mockResolvedValue(2)
 
       const result =
         await new GameCacheRepository().deleteUnreferencedCacheRows(
@@ -567,15 +565,22 @@ describe('GameCacheRepository popularity writes', () => {
         )
 
       expect(result).toEqual({ deleted: 2, skipped: [2] })
-      expect(deleteMany).toHaveBeenCalledWith({
-        where: { igdbId: { in: [1, 3] } }
-      })
+      expect(execute).toHaveBeenCalledTimes(1)
+      const text = sqlOf(execute).strings.join('?')
+      for (const table of [
+        'user_games',
+        'ratings',
+        'reviews',
+        'user_favorite_games'
+      ]) {
+        expect(text).toContain(`NOT EXISTS (SELECT 1 FROM ${table} x`)
+      }
     }
   )
 
   it('deleteUnreferencedCacheRows only counts in a dry run', async () => {
     mockReferences({ userGame: [2] })
-    const deleteMany = vi.spyOn(prisma.gameCache, 'deleteMany')
+    const execute = vi.spyOn(prisma, '$executeRaw')
 
     const result = await new GameCacheRepository().deleteUnreferencedCacheRows(
       [1, 2, 3],
@@ -583,6 +588,6 @@ describe('GameCacheRepository popularity writes', () => {
     )
 
     expect(result).toEqual({ deleted: 2, skipped: [2] })
-    expect(deleteMany).not.toHaveBeenCalled()
+    expect(execute).not.toHaveBeenCalled()
   })
 })

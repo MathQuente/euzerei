@@ -3,11 +3,16 @@ export interface PopularityValues {
   totalRatingCount: number
 }
 
+export interface PreviousPopularity {
+  hypes: number | null
+  totalRatingCount: number | null
+}
+
 export type PopularityBackupRow =
   | { igdbId: number; inserted: true }
   | {
       igdbId: number
-      previous: PopularityValues
+      previous: PreviousPopularity
       next: PopularityValues
     }
 
@@ -35,6 +40,16 @@ function isValues(value: unknown): value is PopularityValues {
   )
 }
 
+function isPrevious(value: unknown): value is PreviousPopularity {
+  const v = value as Partial<PreviousPopularity> | null
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    (v.hypes === null || isCount(v.hypes)) &&
+    (v.totalRatingCount === null || isCount(v.totalRatingCount))
+  )
+}
+
 export function parsePopularityBackup(text: string): PopularityBackupRow[] {
   return text
     .split('\n')
@@ -44,6 +59,9 @@ export function parsePopularityBackup(text: string): PopularityBackupRow[] {
       try {
         value = JSON.parse(line)
       } catch {
+        throw new Error(`Invalid backup line: "${line}"`)
+      }
+      if (typeof value !== 'object' || value === null) {
         throw new Error(`Invalid backup line: "${line}"`)
       }
       const igdbId = value.igdbId
@@ -57,7 +75,7 @@ export function parsePopularityBackup(text: string): PopularityBackupRow[] {
       if (value.inserted === true && Object.keys(value).length === 2) {
         return { igdbId, inserted: true as const }
       }
-      if (isValues(value.previous) && isValues(value.next)) {
+      if (isPrevious(value.previous) && isValues(value.next)) {
         return { igdbId, previous: value.previous, next: value.next }
       }
       throw new Error(`Invalid backup line: "${line}"`)

@@ -10,6 +10,19 @@ import { MIN_HYPES, MIN_TOTAL_RATING_COUNT } from '../utils/catalog-popularity'
 
 const HIDDEN_STATUS_IDS = [GAME_STATUS.CANCELLED, GAME_STATUS.RUMORED]
 
+export function catalogPopularityWhere(): Prisma.GameCacheWhereInput {
+  return {
+    OR: [
+      { totalRatingCount: { gte: MIN_TOTAL_RATING_COUNT } },
+      { hypes: { gte: MIN_HYPES } }
+    ]
+  }
+}
+
+export function catalogPopularitySql() {
+  return Prisma.sql`(gc.total_rating_count >= ${MIN_TOTAL_RATING_COUNT} OR gc.hypes >= ${MIN_HYPES})`
+}
+
 export function catalogVisibilityWhere(): Prisma.GameCacheWhereInput {
   return {
     OR: [
@@ -79,15 +92,7 @@ export class GameCacheRepository {
     }
 
     const where: Prisma.GameCacheWhereInput = {
-      AND: [
-        {
-          OR: [
-            { totalRatingCount: { gte: MIN_TOTAL_RATING_COUNT } },
-            { hypes: { gte: MIN_HYPES } }
-          ]
-        },
-        catalogVisibilityWhere()
-      ],
+      AND: [catalogPopularityWhere(), catalogVisibilityWhere()],
       ...(query ? { name: { contains: query, mode: 'insensitive' } } : {})
     }
 
@@ -131,7 +136,7 @@ export class GameCacheRepository {
     offset: number
     query: string
   }) {
-    const where = Prisma.sql`WHERE (gc.total_rating_count >= ${MIN_TOTAL_RATING_COUNT} OR gc.hypes >= ${MIN_HYPES}) AND ${catalogVisibilitySql()} AND ${relevanceMatchSql(query)}`
+    const where = Prisma.sql`WHERE ${catalogPopularitySql()} AND ${catalogVisibilitySql()} AND ${relevanceMatchSql(query)}`
 
     const [games, countResult] = await Promise.all([
       prisma.$queryRaw<
@@ -194,7 +199,7 @@ export class GameCacheRepository {
     const nameFilter = query
       ? Prisma.sql`AND gc.name ILIKE ${`%${query}%`}`
       : Prisma.empty
-    const where = Prisma.sql`WHERE (gc.total_rating_count >= ${MIN_TOTAL_RATING_COUNT} OR gc.hypes >= ${MIN_HYPES}) AND ${catalogVisibilitySql()} ${nameFilter}`
+    const where = Prisma.sql`WHERE ${catalogPopularitySql()} AND ${catalogVisibilitySql()} ${nameFilter}`
 
     const [games, countResult] = await Promise.all([
       prisma.$queryRaw<
@@ -736,13 +741,7 @@ export class GameCacheRepository {
 
   async findPopularIdsAfter(afterId: number, limit: number): Promise<number[]> {
     const rows = await prisma.gameCache.findMany({
-      where: {
-        igdbId: { gt: afterId },
-        OR: [
-          { totalRatingCount: { gte: MIN_TOTAL_RATING_COUNT } },
-          { hypes: { gte: MIN_HYPES } }
-        ]
-      },
+      where: { igdbId: { gt: afterId }, AND: [catalogPopularityWhere()] },
       orderBy: { igdbId: 'asc' },
       take: limit,
       select: { igdbId: true }
@@ -784,7 +783,7 @@ export class GameCacheRepository {
   async restorePopularity(
     rows: Array<{
       igdbId: number
-      previous: { hypes: number; totalRatingCount: number }
+      previous: { hypes: number | null; totalRatingCount: number | null }
       next: { hypes: number; totalRatingCount: number }
     }>,
     dryRun: boolean
@@ -858,18 +857,23 @@ export class GameCacheRepository {
     dryRun: boolean
   ): Promise<{ deleted: number; skipped: number[] }> {
     const referenced = await this.findReferencedIgdbIds(ids)
-    const free = ids.filter(id => !referenced.has(id))
+    const skipped = ids.filter(id => referenced.has(id))
+    let deleted = ids.length - skipped.length
     if (!dryRun) {
-      for (let i = 0; i < free.length; i += 5000) {
-        await prisma.gameCache.deleteMany({
-          where: { igdbId: { in: free.slice(i, i + 5000) } }
-        })
+      deleted = 0
+      for (let i = 0; i < ids.length; i += 5000) {
+        const chunk = ids.slice(i, i + 5000)
+        deleted += await prisma.$executeRaw(Prisma.sql`
+          DELETE FROM games_cache gc
+          WHERE gc.igdb_id IN (${Prisma.join(chunk)})
+            AND NOT EXISTS (SELECT 1 FROM user_games x WHERE x.igdb_id = gc.igdb_id)
+            AND NOT EXISTS (SELECT 1 FROM ratings x WHERE x.igdb_id = gc.igdb_id)
+            AND NOT EXISTS (SELECT 1 FROM reviews x WHERE x.igdb_id = gc.igdb_id)
+            AND NOT EXISTS (SELECT 1 FROM user_favorite_games x WHERE x.igdb_id = gc.igdb_id)
+        `)
       }
     }
-    return {
-      deleted: free.length,
-      skipped: ids.filter(id => referenced.has(id))
-    }
+    return { deleted, skipped }
   }
 
   async updateGameModes(
