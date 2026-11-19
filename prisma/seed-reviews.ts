@@ -199,7 +199,7 @@ async function main() {
         update: { password: passwordHash, emailVerifiedAt: new Date() },
         create: {
           email,
-          userName: `Seed Resenhista ${k + 1}`,
+          userName: `seed-resenhista-${k + 1}`,
           password: passwordHash,
           emailVerifiedAt: new Date()
         }

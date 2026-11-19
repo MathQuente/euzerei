@@ -4,11 +4,39 @@ import { ClientError } from '../errors/client-error'
 import { CreateUserDTO } from '../dtos/user.dto'
 import { hashToken } from '../utils/hash-token'
 import { termsAcceptance } from '../utils/terms'
+import { isUniqueViolation } from '../utils/prisma-errors'
+import { handlePrefix, uniqueHandle, toHandle } from '../utils/user-handle'
 import type { OAuthProvider } from '../services/auth.service'
 
 const MAX_SESSIONS_PER_USER = 10
+const HANDLE_ATTEMPTS = 5
 
 export class AuthRepository {
+  /**
+   * Cria a conta com um handle livre derivado do nome. Duas contas criadas ao
+   * mesmo tempo podem escolher o mesmo handle: a restrição única do banco
+   * recusa a segunda, que tenta de novo com a lista atualizada.
+   */
+  private async createWithHandle<T>(
+    rawName: string | null | undefined,
+    create: (handle: string) => Promise<T>
+  ): Promise<T> {
+    const base = toHandle(rawName)
+    for (let attempt = 1; ; attempt++) {
+      const rows = await prisma.user.findMany({
+        where: { userName: { startsWith: handlePrefix(base) } },
+        select: { userName: true }
+      })
+      const taken = new Set(rows.map(row => row.userName.toLowerCase()))
+      const handle = uniqueHandle(rawName, h => taken.has(h))
+      try {
+        return await create(handle)
+      } catch (error) {
+        if (!isUniqueViolation(error) || attempt >= HANDLE_ATTEMPTS) throw error
+      }
+    }
+  }
+
   private async persistToken(
     tx: Prisma.TransactionClient,
     token: string,
@@ -80,17 +108,19 @@ export class AuthRepository {
   }
 
   async createUser(data: CreateUserDTO) {
-    return prisma.user.create({
-      data: {
-        email: data.email,
-        password: data.password,
-        userName: data.userName,
-        ...termsAcceptance()
-      },
-      select: {
-        id: true
-      }
-    })
+    return this.createWithHandle(data.userName, userName =>
+      prisma.user.create({
+        data: {
+          email: data.email,
+          password: data.password,
+          userName,
+          ...termsAcceptance()
+        },
+        select: {
+          id: true
+        }
+      })
+    )
   }
 
   async createUserWithGoogle(data: {
@@ -100,19 +130,21 @@ export class AuthRepository {
     googleId: string
     password: string
   }) {
-    return prisma.user.create({
-      data: {
-        email: data.email,
-        userName: data.name,
-        profilePicture: data.picture,
-        googleId: data.googleId,
-        password: data.password,
-        hasPassword: false,
-        emailVerifiedAt: new Date(),
-        ...termsAcceptance()
-      },
-      select: { id: true }
-    })
+    return this.createWithHandle(data.name, userName =>
+      prisma.user.create({
+        data: {
+          email: data.email,
+          userName,
+          profilePicture: data.picture,
+          googleId: data.googleId,
+          password: data.password,
+          hasPassword: false,
+          emailVerifiedAt: new Date(),
+          ...termsAcceptance()
+        },
+        select: { id: true, userName: true }
+      })
+    )
   }
 
   async findByEmail(email: string, includePassword = false) {
@@ -224,14 +256,17 @@ export class AuthRepository {
     password: string
     profilePicture: string | null
   }) {
-    return prisma.user.create({
-      data: {
-        ...data,
-        hasPassword: false,
-        emailVerifiedAt: new Date(),
-        ...termsAcceptance()
-      }
-    })
+    return this.createWithHandle(data.userName, userName =>
+      prisma.user.create({
+        data: {
+          ...data,
+          userName,
+          hasPassword: false,
+          emailVerifiedAt: new Date(),
+          ...termsAcceptance()
+        }
+      })
+    )
   }
 
   private async linkProvider(

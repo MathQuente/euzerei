@@ -1,7 +1,9 @@
+import z from 'zod'
 import { Platform, Status } from '../database/prisma-client'
 import { UpdateUserDTO } from '../dtos/user.dto'
 import { ClientError } from '../errors/client-error'
 import { isRecordNotFound, isUniqueViolation } from '../utils/prisma-errors'
+import { HANDLE_REGEX, isReservedHandle } from '../utils/user-handle'
 import { RatingRepository } from '../repositories/rating.repository'
 import { QUEUE_FILTER, UserRepository } from '../repositories/users.repository'
 import { FollowRepository } from '../repositories/follow.repository'
@@ -45,6 +47,32 @@ export class UserService {
     private platformRepository: UserGamePlatformRepository = new UserGamePlatformRepository(),
     private cacheRepository: CacheRepository = new CacheRepository()
   ) {}
+
+  /** Aceita UUID (links antigos) ou handle e devolve sempre o id. */
+  async resolveUserRef(ref: string): Promise<string> {
+    if (z.uuid().safeParse(ref).success) return ref
+    const id = await this.userRepository.findIdByUserName(ref)
+    if (!id) throw new ClientError('Usuário não encontrado.', 404)
+    return id
+  }
+
+  async checkHandle(
+    handle: string,
+    currentUserId?: string
+  ): Promise<{
+    available: boolean
+    reason: 'invalid' | 'reserved' | 'taken' | null
+  }> {
+    if (isReservedHandle(handle))
+      return { available: false, reason: 'reserved' }
+    if (!HANDLE_REGEX.test(handle))
+      return { available: false, reason: 'invalid' }
+    const ownerId = await this.userRepository.findIdByUserName(handle)
+    if (ownerId && ownerId !== currentUserId) {
+      return { available: false, reason: 'taken' }
+    }
+    return { available: true, reason: null }
+  }
 
   private async requireUser(userId: string) {
     const user = await this.userRepository.findUserById(userId)
@@ -801,11 +829,19 @@ export class UserService {
   async update(userId: string, data: UpdateUserDTO) {
     const existing = await this.requireUser(userId)
 
-    const user = await this.userRepository.updateUser(userId, {
-      profilePicture: data.profilePicture,
-      userBanner: data.userBanner,
-      userName: data.userName
-    })
+    let user
+    try {
+      user = await this.userRepository.updateUser(userId, {
+        profilePicture: data.profilePicture,
+        userBanner: data.userBanner,
+        userName: data.userName
+      })
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ClientError('Este nome de usuário já está em uso.', 409)
+      }
+      throw error
+    }
 
     const replaced: string[] = []
     if (

@@ -392,7 +392,7 @@ export class AuthService {
         user = {
           id: created.id,
           email,
-          userName: profile.name,
+          userName: created.userName ?? profile.name,
           profilePicture: profile.picture
         }
       }

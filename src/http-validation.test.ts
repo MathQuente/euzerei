@@ -283,13 +283,16 @@ describe('HTTP validation with the real schemas', () => {
     }
   )
 
-  it('accepts a UUID v4 and rejects a non-UUID id in the param', async () => {
+  it('accepts a UUID v4 or a handle and rejects anything else in the param', async () => {
     const app = buildApp()
 
     const ok = await app.inject({ url: `/users/${VALID_UUID}` })
     expect(ok.statusCode).toBe(200)
 
-    const bad = await app.inject({ url: '/users/nao-e-uuid' })
+    const handle = await app.inject({ url: '/users/matheus-silva' })
+    expect(handle.statusCode).toBe(200)
+
+    const bad = await app.inject({ url: '/users/Nao%20e%20handle' })
     expect(bad.statusCode).toBe(400)
   })
 

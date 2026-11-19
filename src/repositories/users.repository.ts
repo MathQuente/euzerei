@@ -1,3 +1,4 @@
+import { toHandleSearch } from '../utils/user-handle'
 import { Console, Platform, Prisma, Status } from '../database/prisma-client'
 import { prisma } from '../database/db'
 import { ClientError } from '../errors/client-error'
@@ -593,7 +594,7 @@ export class UserRepository {
   async findManyUsers({ pageIndex = 0, limit = 18, query = '' } = {}) {
     return prisma.user.findMany({
       where: {
-        userName: query ? { contains: query } : undefined
+        userName: query ? { contains: toHandleSearch(query) } : undefined
       },
       orderBy: [{ userName: 'asc' }],
       skip: pageIndex * limit,
@@ -810,6 +811,14 @@ export class UserRepository {
         }
       })
     })
+  }
+
+  async findIdByUserName(userName: string) {
+    const user = await prisma.user.findUnique({
+      where: { userName },
+      select: { id: true }
+    })
+    return user?.id ?? null
   }
 
   async updateUser(userId: string, data: UpdateUserDTO) {

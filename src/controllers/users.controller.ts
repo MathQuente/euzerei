@@ -75,18 +75,31 @@ export class UserController {
   }
 
   async getUser(request: FastifyRequest, reply: FastifyReply) {
-    const { userId } = UserSchema.UserParamsSchema.parse(request.params)
+    const { userId: ref } = UserSchema.UserParamsSchema.parse(request.params)
+    const userId = await this.userService.resolveUserRef(ref)
     const { user } = await this.userService.findById(userId)
     return reply.status(200).send({ user })
   }
 
   async getPublicUserGames(request: FastifyRequest, reply: FastifyReply) {
-    const { userId } = UserSchema.UserParamsSchema.parse(request.params)
+    const { userId: ref } = UserSchema.UserParamsSchema.parse(request.params)
+    const userId = await this.userService.resolveUserRef(ref)
 
     const { totalPerStatus, games, total } =
       await this.userService.findPublicUserGames(userId)
 
     return reply.status(200).send({ totalPerStatus, games, total })
+  }
+
+  async checkHandle(request: FastifyRequest, reply: FastifyReply) {
+    const { handle } = UserSchema.HandleAvailableQuerySchema.parse(
+      request.query
+    )
+    const result = await this.userService.checkHandle(
+      handle,
+      request.user.userId
+    )
+    return reply.status(200).send(result)
   }
 
   async getRoulette(request: FastifyRequest, reply: FastifyReply) {
@@ -103,7 +116,8 @@ export class UserController {
   }
 
   async getFavorites(request: FastifyRequest, reply: FastifyReply) {
-    const { userId } = UserSchema.UserParamsSchema.parse(request.params)
+    const { userId: ref } = UserSchema.UserParamsSchema.parse(request.params)
+    const userId = await this.userService.resolveUserRef(ref)
 
     const { games } = await this.userService.getFavorites(userId)
 
@@ -125,7 +139,8 @@ export class UserController {
   }
 
   async getUserFollowers(request: FastifyRequest, reply: FastifyReply) {
-    const { userId } = UserSchema.UserParamsSchema.parse(request.params)
+    const { userId: ref } = UserSchema.UserParamsSchema.parse(request.params)
+    const userId = await this.userService.resolveUserRef(ref)
 
     const { followers } = await this.userService.findUserFollowers(userId)
 
@@ -133,7 +148,8 @@ export class UserController {
   }
 
   async getUserFollowing(request: FastifyRequest, reply: FastifyReply) {
-    const { userId } = UserSchema.UserParamsSchema.parse(request.params)
+    const { userId: ref } = UserSchema.UserParamsSchema.parse(request.params)
+    const userId = await this.userService.resolveUserRef(ref)
 
     const { following } = await this.userService.findUserFollowing(userId)
 

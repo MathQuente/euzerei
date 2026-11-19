@@ -144,6 +144,21 @@ export async function userRoutes(app: FastifyInstance) {
   )
 
   app.withTypeProvider<ZodTypeProvider>().get(
+    '/handle-available',
+    {
+      preHandler: [app.authenticate],
+      schema: {
+        querystring: UserSchema.HandleAvailableQuerySchema,
+        response: {
+          200: UserSchema.HandleAvailableResponseSchema,
+          500: ErrorSchemas.InternalServerError
+        }
+      }
+    },
+    async (request, reply) => userController.checkHandle(request, reply)
+  )
+
+  app.withTypeProvider<ZodTypeProvider>().get(
     '/:userId',
     {
       schema: {

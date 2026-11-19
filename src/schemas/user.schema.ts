@@ -2,6 +2,7 @@ import { MAX_FAVORITE_GAMES, ROULETTE_MAX_GAMES } from '../utils/library-status'
 import z from 'zod'
 import { PrecisionSchema } from './game.schema'
 import { isConsoleAllowed } from '../utils/platform-consoles'
+import { HANDLE_REGEX, isReservedHandle } from '../utils/user-handle'
 
 export const DeleteUserResponseSchema = z.object({
   user: z.object({
@@ -10,8 +11,28 @@ export const DeleteUserResponseSchema = z.object({
   })
 })
 
+export const HandleSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(
+    HANDLE_REGEX,
+    'Use de 3 a 30 caracteres: letras minúsculas, números, _ e -, começando e terminando com letra ou número.'
+  )
+  .refine(handle => !isReservedHandle(handle), 'Este nome não está disponível.')
+
+/** Perfil por UUID (links antigos) ou por handle (`/users/matheus-silva`). */
 export const UserParamsSchema = z.object({
-  userId: z.uuid()
+  userId: z.union([z.uuid(), HandleSchema])
+})
+
+export const HandleAvailableQuerySchema = z.object({
+  handle: z.string().trim().toLowerCase().max(64)
+})
+
+export const HandleAvailableResponseSchema = z.object({
+  available: z.boolean(),
+  reason: z.enum(['invalid', 'reserved', 'taken']).nullable()
 })
 
 const AchievementStatsSchema = z.object({
@@ -288,7 +309,7 @@ const ImageUrlSchema = z
 
 export const UpdateUserBodySchema = z
   .object({
-    userName: z.string().trim().min(1).max(30).nullable(),
+    userName: HandleSchema,
     profilePicture: ImageUrlSchema.nullable(),
     userBanner: ImageUrlSchema.nullable()
   })

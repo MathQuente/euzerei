@@ -2683,3 +2683,74 @@ describe('UserService.findRouletteGames', () => {
     ).rejects.toThrow(ClientError)
   })
 })
+
+describe('UserService.resolveUserRef / checkHandle / update', () => {
+  const UUID = '3f2b8c1e-6d4a-4a39-9c1e-0b1c2d3e4f5a'
+
+  function build(repo: Record<string, unknown>) {
+    return new UserService(
+      fakeUserRepository(repo),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+  }
+
+  it('returns a uuid untouched and resolves a handle to the id', async () => {
+    const findIdByUserName = vi.fn().mockResolvedValue('user-9')
+    const service = build({ findIdByUserName })
+
+    await expect(service.resolveUserRef(UUID)).resolves.toBe(UUID)
+    expect(findIdByUserName).not.toHaveBeenCalled()
+    await expect(service.resolveUserRef('ana-lima')).resolves.toBe('user-9')
+    expect(findIdByUserName).toHaveBeenCalledWith('ana-lima')
+  })
+
+  it('answers 404 when the handle does not exist', async () => {
+    const service = build({ findIdByUserName: vi.fn().mockResolvedValue(null) })
+    await expect(service.resolveUserRef('ninguem')).rejects.toMatchObject({
+      statusCode: 404
+    })
+  })
+
+  it('reports invalid, reserved, taken and available handles', async () => {
+    const service = build({
+      findIdByUserName: vi.fn(async (h: string) => (h === 'ana' ? 'u-2' : null))
+    })
+    await expect(service.checkHandle('Ana Lima')).resolves.toEqual({
+      available: false,
+      reason: 'invalid'
+    })
+    await expect(service.checkHandle('me')).resolves.toEqual({
+      available: false,
+      reason: 'reserved'
+    })
+    await expect(service.checkHandle('ana', 'u-1')).resolves.toEqual({
+      available: false,
+      reason: 'taken'
+    })
+    await expect(service.checkHandle('ana', 'u-2')).resolves.toEqual({
+      available: true,
+      reason: null
+    })
+    await expect(service.checkHandle('livre-123')).resolves.toEqual({
+      available: true,
+      reason: null
+    })
+  })
+
+  it('answers 409 when the new user name is already taken', async () => {
+    const service = build({
+      findUserById: vi.fn().mockResolvedValue({ id: 'u-1' }),
+      updateUser: vi.fn().mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: 'test'
+        })
+      )
+    })
+    await expect(
+      service.update('u-1', { userName: 'ana' })
+    ).rejects.toMatchObject({ statusCode: 409 })
+  })
+})

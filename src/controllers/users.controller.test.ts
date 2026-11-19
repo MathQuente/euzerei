@@ -173,6 +173,7 @@ describe('UserController.getPublicUserGames', () => {
     })
     const findManyUserGames = vi.fn()
     const controller = new UserController({
+      resolveUserRef: vi.fn(async (ref: string) => ref),
       findPublicUserGames,
       findManyUserGames
     } as unknown as UserService)

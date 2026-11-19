@@ -5,6 +5,7 @@ import { Platform, Prisma } from '../src/database/prisma-client'
 import { prisma } from '../src/database/db'
 import { IGDBService } from '../src/services/igdb.service'
 import { getSeedPassword } from '../src/utils/seed-password'
+import { uniqueHandle } from '../src/utils/user-handle'
 import { createRng } from './seed-demo/random'
 import {
   FEMALE_FIRST_NAMES,
@@ -280,12 +281,15 @@ async function main() {
   const names = uniqueUserNames(USER_COUNT)
   const avatars = await buildAvatars(names)
   const takenEmails = new Set<string>()
+  const takenHandles = new Set<string>()
 
-  const users = names.map((userName, i) => {
+  const users = names.map((name, i) => {
+    const userName = uniqueHandle(name, h => takenHandles.has(h))
+    takenHandles.add(userName)
     const createdAt = new Date(now - rng.between(30, 365) * DAY_MS)
     return {
       id: crypto.randomUUID(),
-      email: emailFor(userName, takenEmails),
+      email: emailFor(name, takenEmails),
       userName,
       password: passwordHash,
       profilePicture: avatars[i],

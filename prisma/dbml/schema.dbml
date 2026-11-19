@@ -29,7 +29,7 @@ Table ratings {
 Table users {
   id String [pk]
   email String [unique, not null]
-  userName String
+  userName String [unique, not null]
   password String [not null]
   hasPassword Boolean [not null, default: true]
   profilePicture String

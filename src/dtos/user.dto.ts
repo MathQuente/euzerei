@@ -15,7 +15,7 @@ export interface AddGameDTO {
 }
 
 export interface UpdateUserDTO {
-  userName?: string | null
+  userName?: string
   profilePicture?: string | null
   userBanner?: string | null
 }

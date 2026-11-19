@@ -4,6 +4,7 @@ import {
   DeleteUserResponseSchema,
   QueryStringSchema,
   UpdateUserBodySchema,
+  UserParamsSchema,
   UserGameBodySchema,
   UserGameHoursUpdateBodySchema,
   UserGamePlatformUpdateBodySchema,
@@ -38,13 +39,34 @@ describe('UpdateUserBodySchema', () => {
     )
   })
 
-  it('limits the user name length', () => {
+  it('only accepts a handle as user name', () => {
     expect(
       UpdateUserBodySchema.safeParse({ userName: 'a'.repeat(31) }).success
     ).toBe(false)
-    expect(UpdateUserBodySchema.parse({ userName: '  Ana  ' }).userName).toBe(
-      'Ana'
+    expect(UpdateUserBodySchema.safeParse({ userName: 'ab' }).success).toBe(
+      false
     )
+    expect(
+      UpdateUserBodySchema.safeParse({ userName: 'Ana Lima' }).success
+    ).toBe(false)
+    expect(UpdateUserBodySchema.safeParse({ userName: null }).success).toBe(
+      false
+    )
+    expect(UpdateUserBodySchema.safeParse({ userName: 'me' }).success).toBe(
+      false
+    )
+    expect(UpdateUserBodySchema.parse({ userName: '  Ana  ' }).userName).toBe(
+      'ana'
+    )
+  })
+
+  it('accepts a uuid or a handle as profile reference', () => {
+    const ok = (userId: string) =>
+      UserParamsSchema.safeParse({ userId }).success
+    expect(ok('3f2b8c1e-6d4a-4a39-9c1e-0b1c2d3e4f5a')).toBe(true)
+    expect(ok('matheus-silva')).toBe(true)
+    expect(ok('Matheus Silva')).toBe(false)
+    expect(ok('me')).toBe(false)
   })
 })
 

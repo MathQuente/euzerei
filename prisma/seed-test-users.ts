@@ -28,25 +28,25 @@ interface TestUserPlan {
 const PLANS: TestUserPlan[] = [
   {
     email: 'sem.jogos@teste.com',
-    userName: 'SemJogosTeste',
+    userName: 'sem-jogos-teste',
     gameCount: 0,
     withReviews: false
   },
   {
     email: 'poucos.jogos@teste.com',
-    userName: 'PoucosJogosTeste',
+    userName: 'poucos-jogos-teste',
     gameCount: 3,
     withReviews: true
   },
   {
     email: 'muitos.jogos@teste.com',
-    userName: 'MuitosJogosTeste',
+    userName: 'muitos-jogos-teste',
     gameCount: 80,
     withReviews: true
   },
   {
     email: 'reviewer@teste.com',
-    userName: 'ReviewerTeste',
+    userName: 'reviewer-teste',
     gameCount: 15,
     withReviews: true
   }
