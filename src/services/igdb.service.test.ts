@@ -332,6 +332,19 @@ describe('IGDBService.joinAlternativeNames', () => {
     expect(IGDBService.joinAlternativeNames(undefined)).toBeNull()
   })
 
+  it('keeps the original IGDB name searchable when the display name changes', () => {
+    const input = IGDBService.toGameCacheInput({
+      id: 2153,
+      name: 'FIFA Soccer 13',
+      alternative_names: [{ name: 'FIFA 13: World Class Soccer' }]
+    } as IGDBGame)
+
+    expect(input.name).toBe('FIFA 13')
+    expect(input.alternativeNames).toBe(
+      'FIFA Soccer 13 | FIFA 13: World Class Soccer'
+    )
+  })
+
   it('stores them on the cache input', () => {
     expect(
       IGDBService.toGameCacheInput({

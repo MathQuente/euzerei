@@ -1,3 +1,4 @@
+import { displayName, legacySlugToIgdbId } from '../utils/game-display-names'
 import { ClientError } from '../errors/client-error'
 import { IGDBGame } from '../types/igdb'
 import { GameCacheRepository } from '../repositories/game-cache.repository'
@@ -57,7 +58,7 @@ export class GameService {
         ? {
             igdbId: game.parent_game.id,
             slug: slugs.get(game.parent_game.id) ?? null,
-            name: game.parent_game.name,
+            name: displayName(game.parent_game.id, game.parent_game.name),
             coverUrl: IGDBService.formatCoverUrl(game.parent_game.cover?.url),
             platforms: game.parent_game.platforms?.map(p => p.name)
           }
@@ -93,7 +94,7 @@ export class GameService {
     return {
       igdbId: game.id,
       slug: slugs.get(game.id) ?? null,
-      name: game.name,
+      name: displayName(game.id, game.name),
       coverUrl: IGDBService.formatCoverUrl(game.cover?.url),
       summary: game.summary,
       genres: game.genres?.map(g => g.name) ?? [],
@@ -251,7 +252,8 @@ export class GameService {
     const normalized = slug.toLowerCase()
     const igdbId = /^\d+$/.test(normalized)
       ? Number(normalized)
-      : await this.gameCacheRepository.findIdBySlug(normalized)
+      : ((await this.gameCacheRepository.findIdBySlug(normalized)) ??
+        legacySlugToIgdbId(normalized))
 
     if (igdbId === null || !Number.isSafeInteger(igdbId)) {
       throw new ClientError('Jogo não encontrado.', 404)

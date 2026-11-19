@@ -154,6 +154,23 @@ describe('GameService.findGameBySlug', () => {
     expect(spy).toHaveBeenCalledWith(62151)
   })
 
+  it('keeps the old slug of a renamed game working', async () => {
+    const findIdBySlug = vi.fn().mockResolvedValue(null)
+    const service = new GameService(
+      {} as unknown as RatingRepository,
+      { findIdBySlug } as unknown as GameCacheRepository,
+      {} as UserRepository,
+      {} as unknown as CacheRepository
+    )
+    const spy = vi
+      .spyOn(service, 'findGameById')
+      .mockResolvedValue({ game: {}, relatedGames: [] } as never)
+
+    await service.findGameBySlug('fifa-soccer-13')
+
+    expect(spy).toHaveBeenCalledWith(2153)
+  })
+
   it('treats an all-digit slug as an id without hitting the cache', async () => {
     const { service, spy } = slugSetup()
     await service.findGameBySlug('62151')

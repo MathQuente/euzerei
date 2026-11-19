@@ -1,5 +1,6 @@
 import { IGDBRequestError } from '../errors/igdb-request-error'
 import { IGDBGame } from '../types/igdb'
+import { displayName, overriddenIgdbName } from '../utils/game-display-names'
 import { fetchWithTimeout } from '../utils/fetch-with-timeout'
 import { GAME_STATUS, isHiddenFromCatalog } from '../utils/game-status'
 import { releaseDatePrecision } from '../utils/release-precision'
@@ -143,10 +144,16 @@ export class IGDBService {
     return g.game_type ?? g.category ?? -1
   }
 
-  static joinAlternativeNames(names: { name: string }[] | undefined) {
-    const unique = [...new Set((names ?? []).map(n => n.name.trim()))].filter(
-      Boolean
-    )
+  static joinAlternativeNames(
+    names: { name: string }[] | undefined,
+    igdbId?: number
+  ) {
+    const original = igdbId === undefined ? null : overriddenIgdbName(igdbId)
+    const all = [
+      ...(original ? [original] : []),
+      ...(names ?? []).map(n => n.name)
+    ]
+    const unique = [...new Set(all.map(n => n.trim()))].filter(Boolean)
     return unique.length > 0 ? unique.join(' | ') : null
   }
 
@@ -162,7 +169,10 @@ export class IGDBService {
       `where id = (${ids.join(',')}); fields id,alternative_names.name; limit ${Math.min(ids.length, 500)};`
     )
     for (const row of rows) {
-      result.set(row.id, this.joinAlternativeNames(row.alternative_names))
+      result.set(
+        row.id,
+        this.joinAlternativeNames(row.alternative_names, row.id)
+      )
     }
     return result
   }
@@ -172,8 +182,8 @@ export class IGDBService {
       this.toCacheReleaseDate(g.first_release_date) ?? undefined
     return {
       igdbId: g.id,
-      name: g.name,
-      alternativeNames: this.joinAlternativeNames(g.alternative_names),
+      name: displayName(g.id, g.name),
+      alternativeNames: this.joinAlternativeNames(g.alternative_names, g.id),
       coverUrl: this.formatCoverUrl(g.cover?.url),
       summary: g.summary,
       genres: g.genres?.map(x => x.name) ?? [],
