@@ -629,7 +629,8 @@ export class XboxService {
               mostCompleted.lastPlayedAt ??
               undefined)
             : undefined,
-          endless: IGDBService.suggestsEndlessForGame(igdbGame)
+          endless: IGDBService.suggestsEndlessForGame(igdbGame),
+          lastPlayedAt: lastPlayedAt ?? undefined
         },
         consoleFromXboxDevices(devices, account.preferredConsole),
         account.id

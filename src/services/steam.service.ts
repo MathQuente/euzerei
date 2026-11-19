@@ -57,6 +57,10 @@ const LIBRARY_PROGRESS_SHARE = 90
 
 const RECENT_PLAY_THRESHOLD_SECONDS = 14 * 24 * 60 * 60
 
+function lastPlayedAtOf(rtime?: number) {
+  return rtime && rtime > 0 ? new Date(rtime * 1000) : undefined
+}
+
 export function addFamilySharedGames(
   owned: SteamOwnedGame[],
   recent: SteamOwnedGame[],
@@ -646,7 +650,8 @@ export class SteamService {
           allAchievements: confirmedFinished,
           strongFinished: hasRareAchievement || hasCompletionKeyword,
           completedAt,
-          endless: IGDBService.suggestsEndlessForGame(igdbGame)
+          endless: IGDBService.suggestsEndlessForGame(igdbGame),
+          lastPlayedAt: lastPlayedAtOf(owned.rtime_last_played)
         },
         STEAM_CONSOLE,
         accountId

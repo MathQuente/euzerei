@@ -68,6 +68,7 @@ function setup(found: ReturnType<typeof userGame> | null) {
   const userRepository = {
     addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
     createUserGameStats: vi.fn().mockResolvedValue(null),
+    recordLastPlayed: vi.fn().mockResolvedValue(undefined),
     updateGameStatus: vi.fn().mockResolvedValue(null)
   }
   const service = new UserGamePlatformService(

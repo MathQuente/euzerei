@@ -8,6 +8,7 @@ export type UserGameSortBy =
   | 'hoursPlayed'
   | 'completedAt'
   | 'droppedAt'
+  | 'lastPlayedAt'
 export type UserGameSortOrder = 'asc' | 'desc'
 
 export type FavoriteGameRow = Omit<PaginatedUserGameRow, 'status'> & {
@@ -32,4 +33,6 @@ export type PaginatedUserGameRow = {
   hundredPercent: boolean
   updatedAt?: Date
   droppedAt?: Date | null
+  createdAt?: Date
+  lastPlayedAt?: Date | null
 }

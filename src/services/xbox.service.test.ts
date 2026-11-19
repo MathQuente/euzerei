@@ -42,6 +42,7 @@ function fakeUserRepository(
     findUserGame: vi.fn().mockResolvedValue(null),
     addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
     createUserGameStats: vi.fn().mockResolvedValue(null),
+    recordLastPlayed: vi.fn().mockResolvedValue(undefined),
     upsertUserGameHours: vi.fn().mockResolvedValue(null),
     ...overrides
   } as unknown as UserRepository

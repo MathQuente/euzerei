@@ -474,7 +474,9 @@ export class UserRepository {
                 ? // Desejo não tem data de conclusão: cairia em updated_at, que
                   // a importação e qualquer edição mexem. Vale a data de adição.
                   Prisma.sql`CASE WHEN ugs.status = 'WISHLIST' THEN ug.created_at ELSE COALESCE(ug.completed_at, ug.updated_at) END ${direction}`
-                : sortBy === 'droppedAt'
+                : sortBy === 'lastPlayedAt'
+                  ? Prisma.sql`ug.last_played_at ${direction} NULLS LAST, ug.created_at ${direction}`
+                  : sortBy === 'droppedAt'
                   ? // Jogo que não está em Larguei não tem a data: vale a de adição.
                     Prisma.sql`CASE WHEN ugs.status = 'DROPPED' THEN COALESCE(ug.dropped_at, ug.updated_at) ELSE ug.created_at END ${direction}`
                   : Prisma.sql`ug.created_at ${direction}`
@@ -494,8 +496,12 @@ export class UserRepository {
         : Prisma.empty
 
     const ranked = previewPerStatus !== undefined && take === undefined
+    const queueOrder = Prisma.sql`
+      CASE WHEN ugs.status = 'BACKLOG' AND ug.last_played_at IS NULL THEN 1 ELSE 0 END ASC,
+      CASE WHEN ugs.status = 'DROPPED' THEN COALESCE(ug.dropped_at, ug.updated_at)
+           WHEN ugs.status = 'BACKLOG' THEN COALESCE(ug.last_played_at, ug.created_at) END DESC NULLS LAST,`
     const rowNumber = ranked
-      ? Prisma.sql`ROW_NUMBER() OVER (PARTITION BY ugs.status ORDER BY ${orderByClause}, ug.id) AS rn,`
+      ? Prisma.sql`ROW_NUMBER() OVER (PARTITION BY ugs.status ORDER BY ${queueOrder} ${orderByClause}, ug.id) AS rn,`
       : Prisma.empty
 
     const rows = Prisma.sql`
@@ -507,6 +513,8 @@ export class UserRepository {
         ug.hundred_percent            AS "hundredPercent",
         ug.updated_at                 AS "updatedAt",
         ug.dropped_at                 AS "droppedAt",
+        ug.created_at                 AS "createdAt",
+        ug.last_played_at             AS "lastPlayedAt",
         gc.name                       AS "name",
         gc.slug                       AS "slug",
         gc.cover_url                  AS "coverUrl",
@@ -552,7 +560,7 @@ export class UserRepository {
     return prisma.$queryRaw<PaginatedUserGameRow[]>(Prisma.sql`
       SELECT
         ranked."igdbId", ranked."status", ranked."endless", ranked."hundredPercent",
-        ranked."updatedAt", ranked."droppedAt",
+        ranked."updatedAt", ranked."droppedAt", ranked."createdAt", ranked."lastPlayedAt",
         ranked."name",
         ranked."slug", ranked."coverUrl", ranked."platforms", ranked."releaseDate", ranked."releaseDatePrecision",
         ranked."rating", ranked."completions", ranked."hoursPlayed",
@@ -754,6 +762,17 @@ export class UserRepository {
         igdbId: true,
         UserGamesStatus: { select: { id: true, status: true } }
       }
+    })
+  }
+
+  async recordLastPlayed(igdbId: number, userId: string, playedAt: Date) {
+    return prisma.userGame.updateMany({
+      where: {
+        igdbId,
+        userId,
+        OR: [{ lastPlayedAt: null }, { lastPlayedAt: { lt: playedAt } }]
+      },
+      data: { lastPlayedAt: playedAt }
     })
   }
 

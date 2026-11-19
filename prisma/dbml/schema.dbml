@@ -73,6 +73,7 @@ Table user_games {
   updatedAt DateTime [not null]
   completedAt DateTime
   droppedAt DateTime
+  lastPlayedAt DateTime
   endless Boolean [not null, default: false]
   endlessLocked Boolean [not null, default: false]
   hundredPercent Boolean [not null, default: false]

@@ -113,7 +113,8 @@ export const QueryStringSchema = z.object({
       'dateAdded',
       'hoursPlayed',
       'completedAt',
-      'droppedAt'
+      'droppedAt',
+      'lastPlayedAt'
     ])
     .optional(),
   sortOrder: z.enum(['asc', 'desc']).optional()
@@ -246,7 +247,9 @@ const UserGameEntrySchema = z.object({
   endless: z.boolean(),
   hundredPercent: z.boolean(),
   updatedAt: z.string().optional(),
-  droppedAt: z.string().optional()
+  droppedAt: z.string().optional(),
+  createdAt: z.string().optional(),
+  lastPlayedAt: z.string().optional()
 })
 
 export const GetAllUserGamesResponseSchema = z.object({

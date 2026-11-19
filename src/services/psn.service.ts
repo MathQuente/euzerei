@@ -490,7 +490,8 @@ export class PsnService {
           finished: isFinished,
           confirmedFinished,
           completedAt,
-          endless: IGDBService.suggestsEndlessForGame(igdbGame)
+          endless: IGDBService.suggestsEndlessForGame(igdbGame),
+          lastPlayedAt: game.lastPlayedAt ?? undefined
         },
         consoleFromPsnCategories(game.categories),
         account.id

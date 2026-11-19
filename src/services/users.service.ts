@@ -489,10 +489,12 @@ export class UserService {
       | 'dateAdded'
       | 'hoursPlayed'
       | 'completedAt'
-      | 'droppedAt' = 'dateAdded',
+      | 'droppedAt'
+      | 'lastPlayedAt' = 'dateAdded',
     sortOrder: 'asc' | 'desc' = sortBy === 'dateAdded' ||
     sortBy === 'completedAt' ||
-    sortBy === 'droppedAt'
+    sortBy === 'droppedAt' ||
+    sortBy === 'lastPlayedAt'
       ? 'desc'
       : 'asc',
     options: {
@@ -658,7 +660,9 @@ export class UserService {
             endless: r.endless,
             hundredPercent: r.hundredPercent,
             updatedAt: r.updatedAt?.toISOString(),
-            droppedAt: droppedAtOf(r)
+            droppedAt: droppedAtOf(r),
+            createdAt: r.createdAt?.toISOString(),
+            lastPlayedAt: r.lastPlayedAt?.toISOString()
           }
         }
 
@@ -684,7 +688,9 @@ export class UserService {
           endless: r.endless,
           hundredPercent: r.hundredPercent,
           updatedAt: r.updatedAt?.toISOString(),
-          droppedAt: droppedAtOf(r)
+          droppedAt: droppedAtOf(r),
+          createdAt: r.createdAt?.toISOString(),
+          lastPlayedAt: r.lastPlayedAt?.toISOString()
         }
       })
       .filter((g): g is NonNullable<typeof g> => g !== null)

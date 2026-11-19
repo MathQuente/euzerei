@@ -34,6 +34,7 @@ function fakeUserRepository(
       .mockResolvedValue({ id: 'steam-acc-2', displayName: 'x' }),
     updateAccountName: vi.fn().mockResolvedValue(null),
     markHundredPercentFromImport: vi.fn().mockResolvedValue(true),
+    recordLastPlayed: vi.fn().mockResolvedValue(undefined),
     ...overrides
   } as unknown as UserRepository
 }
@@ -300,6 +301,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 7 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
     vi.spyOn(SteamApiService, 'getOwnedGames').mockResolvedValue([
@@ -536,6 +538,7 @@ describe('SteamService.runImport', () => {
         ),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
     const gameCacheService = fakeGameCacheService()
@@ -610,6 +613,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
     const oneYearAgo = Math.floor(Date.now() / 1000) - 365 * 24 * 60 * 60
@@ -674,6 +678,7 @@ describe('SteamService.runImport', () => {
         findUserGame: vi.fn().mockResolvedValue(null),
         addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
         createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+        recordLastPlayed: vi.fn().mockResolvedValue(undefined),
         upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
       })
 
@@ -982,6 +987,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
 
@@ -1085,6 +1091,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
 
@@ -1138,6 +1145,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
 
@@ -1197,6 +1205,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
 
@@ -1256,6 +1265,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
 
@@ -1320,6 +1330,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
 
@@ -1394,6 +1405,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
 
@@ -1467,6 +1479,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
 
@@ -1532,6 +1545,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
 
@@ -1596,6 +1610,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
 
@@ -1647,6 +1662,7 @@ describe('SteamService.runImport', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 1 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 1 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
 
@@ -1802,6 +1818,7 @@ describe('SteamService.runImport with several accounts', () => {
         return { igdbId: data.igdbId }
       }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 0 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 }),
       ...overrides
     })
@@ -1974,6 +1991,7 @@ describe('SteamService.runImport: endless games that cannot infer a completion',
       updateGameStatus,
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 52826 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 0 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
     vi.spyOn(SteamApiService, 'getOwnedGames').mockResolvedValue([
@@ -2187,6 +2205,7 @@ describe('SteamService.runImport with family shared games', () => {
       findUserGame: vi.fn().mockResolvedValue(null),
       addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 20022 }),
       createUserGameStats: vi.fn().mockResolvedValue({ completions: 0 }),
+      recordLastPlayed: vi.fn().mockResolvedValue(undefined),
       upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 })
     })
     const service = new SteamService(
@@ -2306,6 +2325,7 @@ describe('SteamService.runImport with family shared games', () => {
         findUserGame: vi.fn().mockResolvedValue(null),
         addGameToUserLibrary: vi.fn().mockResolvedValue({ igdbId: 2 }),
         createUserGameStats: vi.fn().mockResolvedValue({ completions: 0 }),
+        recordLastPlayed: vi.fn().mockResolvedValue(undefined),
         upsertUserGameHours: vi.fn().mockResolvedValue({ hoursPlayed: 1 }),
         markHundredPercentFromImport
       })

@@ -38,6 +38,7 @@ export interface ImportedPlatformData {
   strongFinished?: boolean
   completedAt?: Date
   endless?: boolean
+  lastPlayedAt?: Date
 }
 
 export interface PlatformPatch {
@@ -457,6 +458,14 @@ export class UserGamePlatformService {
         resolution.action === 'update' ? resolution.row.console : gameConsole,
         values,
         ...accountHours
+      )
+    }
+
+    if (data.lastPlayedAt) {
+      await this.userRepository.recordLastPlayed(
+        igdbId,
+        userId,
+        data.lastPlayedAt
       )
     }
 
