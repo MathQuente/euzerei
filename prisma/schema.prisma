@@ -51,6 +51,7 @@ model User {
   emailVerifiedAt DateTime?      @map("email_verified_at")
   termsAcceptedAt DateTime?      @map("terms_accepted_at")
   termsVersion    String?        @map("terms_version")
+  role            UserRole       @default(USER)
   createdAt       DateTime       @default(now()) @map("created_at")
   updatedAt       DateTime       @default(now()) @map("updated_at")
   userGames       UserGame[]
@@ -59,6 +60,8 @@ model User {
   Review          Review[]
   accounts        PlatformAccount[]
   favoriteGames   UserFavoriteGame[]
+  auditLogs       AuditLog[]
+  settingsEdits   AppSetting[]
 
   following Follow[] @relation("FollowFollower")
   followers Follow[] @relation("FollowFollowing")
@@ -322,4 +325,49 @@ model UserFavoriteGame {
   @@unique([userId, igdbId])
   @@unique([userId, position])
   @@map("user_favorite_games")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum AuditArea {
+  USERS
+  IMPORTS
+  CATALOG
+  MODERATION
+  SYSTEM
+}
+
+enum AuditResult {
+  OK
+  FAILED
+}
+
+model AuditLog {
+  id        String      @id @default(uuid())
+  actorId   String?     @map("actor_id")
+  action    String
+  area      AuditArea
+  target    String?
+  detail    String?
+  result    AuditResult @default(OK)
+  ip        String?
+  createdAt DateTime    @default(now()) @map("created_at")
+  actor     User?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([area, createdAt])
+  @@map("audit_logs")
+}
+
+model AppSetting {
+  key         String   @id
+  value       Json
+  updatedById String?  @map("updated_by_id")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedBy   User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@map("app_settings")
 }
