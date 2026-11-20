@@ -16,6 +16,8 @@ import { steamRoutes } from './routes/steam'
 import { psnRoutes } from './routes/psn'
 import { xboxRoutes } from './routes/xbox'
 import { followRoutes } from './routes/follow'
+import { panelAuthRoutes } from './routes/panel-auth'
+import { adminRoutes } from './routes/admin'
 import { completionSuggestionRoutes } from './routes/completion-suggestions'
 import { errorHandler } from './error-handler'
 import { userGameStatusRoutes } from './routes/userGameStatus'
@@ -29,6 +31,7 @@ import { healthRoutes } from './routes/health'
 import { registerOriginGuard } from './origin-guard'
 import { shutdown } from './shutdown'
 import { sendProblem } from './utils/problem'
+import { isSessionBound } from './utils/session-bound'
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 8_000
 
@@ -167,6 +170,8 @@ export class Server {
     this.app.register(xboxRoutes, { prefix: '/users/xbox' })
     this.app.register(userGameStatusRoutes, { prefix: '/status' })
     this.app.register(followRoutes, { prefix: '/follows' })
+    this.app.register(panelAuthRoutes, { prefix: '/panel/auth' })
+    this.app.register(adminRoutes, { prefix: '/admin' })
   }
 
   private static async initRateLimit() {
@@ -182,11 +187,9 @@ export class Server {
     await this.app.register(fastifyHelmet)
 
     this.app.addHook('onSend', async (request, reply) => {
-      const isSessionBound =
-        request.url.startsWith('/auth') ||
-        Boolean(request.cookies?.accessToken || request.cookies?.refreshToken)
+      const sessionBound = isSessionBound(request.url, request.cookies)
 
-      if (isSessionBound && !reply.hasHeader('Cache-Control')) {
+      if (sessionBound && !reply.hasHeader('Cache-Control')) {
         reply.header('Cache-Control', 'no-store')
       }
     })
