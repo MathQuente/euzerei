@@ -160,7 +160,7 @@ export class AuthService {
         userId: string
         tokenType?: string
       }
-      if (decoded.tokenType === 'access') {
+      if (decoded.tokenType === 'access' || decoded.tokenType === 'panel') {
         throw new ClientError('Sessão inválida.', 401)
       }
       userId = decoded.userId
@@ -194,7 +194,9 @@ export class AuthService {
         userId: string
         tokenType?: string
       }
-      return decoded.tokenType === 'access' ? null : decoded.userId
+      return decoded.tokenType === 'access' || decoded.tokenType === 'panel'
+        ? null
+        : decoded.userId
     } catch {
       return null
     }

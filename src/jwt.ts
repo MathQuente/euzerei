@@ -9,11 +9,15 @@ import { CacheRepository } from './repositories/cache.repository'
 import { clearAuthCookies, setAccessTokenCookie } from './utils/auth-cookies'
 import { logError, respondUnavailable } from './utils/respond-unavailable'
 import { respondUnauthorized } from './utils/respond-unauthorized'
+import { AdminRepository } from './repositories/admin.repository'
+import { passwordFingerprint, readBearerToken } from './utils/panel-token'
+import { sendProblem } from './utils/problem'
 
 const MIN_SECRET_LENGTH = 32
 
 const authRepository = new AuthRepository()
 const cacheRepository = new CacheRepository()
+const adminRepository = new AdminRepository()
 
 const RENEWABLE_ERROR_CODES = new Set([
   'FST_JWT_NO_AUTHORIZATION_IN_COOKIE',
@@ -62,6 +66,26 @@ async function isSessionRevoked(request: FastifyRequest): Promise<boolean> {
   return typeof revokedAt === 'number' && (iat ?? 0) < revokedAt
 }
 
+interface PanelTokenPayload {
+  userId: string
+  tokenType?: string
+  pv?: string
+  iat?: number
+}
+
+async function isPanelTokenRevoked(
+  token: string,
+  payload: PanelTokenPayload
+): Promise<boolean> {
+  const revokedToken = await cacheRepository.get(revokedAccessTokenKey(token))
+  if (revokedToken !== null) return true
+
+  const revokedAt = await cacheRepository.get(
+    sessionsRevokedAtKey(payload.userId)
+  )
+  return typeof revokedAt === 'number' && (payload.iat ?? 0) < revokedAt
+}
+
 export class Jwt {
   private static getSecret(): string {
     const secret = process.env.SECRET_JWT_KEY
@@ -81,6 +105,7 @@ export class Jwt {
     this.registerCookiePlugin(fastify)
     this.authenticateDecorator(fastify)
     this.tryAuthenticateDecorator(fastify)
+    this.authenticateAdminDecorator(fastify)
     this.registerCorsPlugin(fastify)
   }
 
@@ -116,7 +141,10 @@ export class Jwt {
         try {
           await verifyAccessCookie(request)
 
-          if (request.user.tokenType === 'refresh') {
+          if (
+            request.user.tokenType === 'refresh' ||
+            request.user.tokenType === 'panel'
+          ) {
             return respondUnauthorized(response)
           }
 
@@ -175,6 +203,63 @@ export class Jwt {
     )
   }
 
+  private static authenticateAdminDecorator = (fastify: FastifyInstance) => {
+    fastify.decorate(
+      'authenticateAdmin',
+      async (request: FastifyRequest, response: FastifyReply) => {
+        const token = readBearerToken(request.headers.authorization)
+        if (!token) return respondUnauthorized(response)
+
+        let payload: PanelTokenPayload
+        try {
+          payload = fastify.jwt.verify<PanelTokenPayload>(token)
+        } catch {
+          return respondUnauthorized(response)
+        }
+        if (payload.tokenType !== 'panel') return respondUnauthorized(response)
+
+        let revoked: boolean
+        try {
+          revoked = await isPanelTokenRevoked(token, payload)
+        } catch (revocationCheckError) {
+          return respondUnavailable(
+            response,
+            'Panel revocation check failed:',
+            revocationCheckError
+          )
+        }
+        if (revoked) return respondUnauthorized(response)
+
+        let admin: Awaited<ReturnType<AdminRepository['findById']>>
+        try {
+          admin = await adminRepository.findById(payload.userId)
+        } catch (roleCheckError) {
+          return respondUnavailable(
+            response,
+            'Panel role check failed:',
+            roleCheckError
+          )
+        }
+
+        if (!admin || payload.pv !== passwordFingerprint(admin.password)) {
+          return respondUnauthorized(response)
+        }
+        if (admin.role !== 'ADMIN') {
+          return sendProblem(response, 403, {
+            status: 'forbidden',
+            message: 'Acesso restrito a administradores.'
+          })
+        }
+
+        request.user = {
+          userId: admin.id,
+          tokenType: 'panel',
+          iat: payload.iat
+        } as typeof request.user
+      }
+    )
+  }
+
   private static tryAuthenticateDecorator = (fastify: FastifyInstance) => {
     fastify.decorate(
       'tryAuthenticate',
@@ -206,7 +291,9 @@ export class Jwt {
         }
 
         try {
-          const isAccessToken = request.user.tokenType !== 'refresh'
+          const isAccessToken =
+            request.user.tokenType !== 'refresh' &&
+            request.user.tokenType !== 'panel'
           if (isAccessToken && !(await isSessionRevoked(request))) return
         } catch (revocationCheckError) {
           logError('Revocation check failed:', revocationCheckError)

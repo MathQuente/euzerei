@@ -5,15 +5,17 @@ declare module '@fastify/jwt' {
   interface FastifyJWT {
     payload: {
       userId: string
-      tokenType?: 'access' | 'refresh'
+      tokenType?: 'access' | 'refresh' | 'panel'
       jti?: string
+      pv?: string
       email?: string
       name?: string
     }
     user: {
       userId: string
-      tokenType?: 'access' | 'refresh'
+      tokenType?: 'access' | 'refresh' | 'panel'
       jti?: string
+      pv?: string
       email?: string
       name?: string
     }
@@ -27,6 +29,10 @@ declare module 'fastify' {
       reply: FastifyReply
     ) => Promise<void>
     tryAuthenticate: (
+      request: FastifyRequest,
+      reply: FastifyReply
+    ) => Promise<void>
+    authenticateAdmin: (
       request: FastifyRequest,
       reply: FastifyReply
     ) => Promise<void>
