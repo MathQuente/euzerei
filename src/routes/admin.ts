@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { ZodTypeProvider } from 'fastify-type-provider-zod'
 import { buildPanelAuthController } from './panel-auth'
+import { adminAuditRoutes } from './admin-audit'
 
 export async function adminRoutes(app: FastifyInstance) {
   app.addHook('onRequest', app.authenticateAdmin)
@@ -12,4 +13,6 @@ export async function adminRoutes(app: FastifyInstance) {
     .get('/me', async (request, reply) =>
       panelAuthController.me(request, reply)
     )
+
+  app.register(adminAuditRoutes, { prefix: '/audit' })
 }
