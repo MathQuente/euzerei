@@ -1255,7 +1255,7 @@ describe('UserService.findPublicUserGames', () => {
       expect.objectContaining({
         sortBy: 'completedAt',
         sortOrder: 'desc',
-        previewPerStatus: 6,
+        previewPerStatus: 8,
         uncappedStatuses: ['PLAYING']
       })
     )

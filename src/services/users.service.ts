@@ -617,7 +617,7 @@ export class UserService {
     }
   }
 
-  private readonly PUBLIC_PROFILE_PREVIEW_PER_STATUS = 6
+  private readonly PUBLIC_PROFILE_PREVIEW_PER_STATUS = 8
 
   async findPublicUserGames(userId: string) {
     return this.findManyUserGames(
