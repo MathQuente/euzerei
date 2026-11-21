@@ -1,0 +1,6 @@
+export const LOGIN_ROUTE_LIMIT = 3
+export const LOGIN_FAILURES_PER_IP = 10
+export const LOGIN_FAILURES_PER_EMAIL = 50
+export const LOGIN_FAILURES_WINDOW_MINUTES = 15
+export const RECENT_AUTH_MINUTES = 10
+export const MAX_SESSIONS_PER_USER = 10

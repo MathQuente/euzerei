@@ -30,4 +30,40 @@ describe('parseRedisInfo', () => {
       parseRedisInfo('used_memory_human:41M\r\n').usedMemoryBytes
     ).toBeNull()
   })
+
+  it('Upstash reports used_memory as 0 and the size in total_data_size', () => {
+    const info = [
+      '# Server',
+      'upstash_version:1.19.8',
+      '# Memory',
+      'used_memory:0',
+      'maxmemory:67108864',
+      '# Persistence',
+      'total_keys:13',
+      'total_data_size:112208',
+      'max_data_size:250000000',
+      '# Stats',
+      'evicted_keys:0'
+    ].join('\r\n')
+
+    expect(parseRedisInfo(info)).toEqual({
+      usedMemoryBytes: 112_208,
+      maxMemoryBytes: 250_000_000,
+      evictedKeys: 0
+    })
+  })
+
+  it('a real used_memory wins over total_data_size', () => {
+    const info =
+      'used_memory:5000\r\nmaxmemory:100\r\ntotal_data_size:9\r\nmax_data_size:7\r\n'
+
+    expect(parseRedisInfo(info)).toMatchObject({
+      usedMemoryBytes: 5000,
+      maxMemoryBytes: 100
+    })
+  })
+
+  it('a used_memory of 0 with no data size is unknown, never 0 bytes', () => {
+    expect(parseRedisInfo('used_memory:0\r\n').usedMemoryBytes).toBeNull()
+  })
 })
