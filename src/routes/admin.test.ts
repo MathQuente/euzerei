@@ -13,6 +13,11 @@ const adminImportsService = vi.hoisted(() => ({
   failures: vi.fn(),
   queues: vi.fn()
 }))
+const adminUsersService = vi.hoisted(() => ({
+  list: vi.fn(),
+  summary: vi.fn(),
+  detail: vi.fn()
+}))
 const panelAuthService = vi.hoisted(() => ({
   login: vi.fn(),
   logout: vi.fn(),
@@ -35,6 +40,13 @@ vi.mock('../services/admin-imports.service', () => ({
     summary = adminImportsService.summary
     failures = adminImportsService.failures
     queues = adminImportsService.queues
+  }
+}))
+vi.mock('../services/admin-users.service', () => ({
+  AdminUsersService: class {
+    list = adminUsersService.list
+    summary = adminUsersService.summary
+    detail = adminUsersService.detail
   }
 }))
 vi.mock('../services/panel-auth.service', () => ({
@@ -65,6 +77,7 @@ const allowAdmin: FastifyInstance['authenticateAdmin'] = async request => {
 const denyAll: FastifyInstance['authenticateAdmin'] = async (_request, reply) =>
   reply.status(401).send({ status: 'unauthorized' })
 
+const USER_ID = '2f1c3a4e-5b6d-4e7f-8a9b-0c1d2e3f4a5b'
 const emptyImports = { items: [], page: 1, pageSize: 20, total: 0 }
 const emptyList = { items: [], page: 1, pageSize: 20, total: 0, period: 7 }
 
@@ -75,6 +88,13 @@ beforeEach(() => {
   adminImportsService.summary.mockReset().mockResolvedValue({ queued: 0 })
   adminImportsService.failures.mockReset().mockResolvedValue({ total: 0 })
   adminImportsService.queues.mockReset().mockResolvedValue({ queues: [] })
+  adminUsersService.list
+    .mockReset()
+    .mockResolvedValue({ items: [], page: 1, pageSize: 20, total: 0 })
+  adminUsersService.summary
+    .mockReset()
+    .mockResolvedValue({ total: 0, active7d: 0 })
+  adminUsersService.detail.mockReset().mockResolvedValue({ id: USER_ID })
 })
 
 afterEach(() => vi.restoreAllMocks())
@@ -355,5 +375,191 @@ describe('the other import reads', () => {
 
     expect(response.statusCode).toBe(503)
     expect(response.json().message).toBe('Não foi possível ler as filas agora.')
+  })
+})
+
+const USER_PATHS = [
+  '/admin/users',
+  '/admin/users/summary',
+  `/admin/users/${USER_ID}`
+]
+
+describe('the user reads are behind the admin guard', () => {
+  it.each(USER_PATHS)(
+    '%s answers 401 and never reaches the service',
+    async url => {
+      const app = await buildApp(denyAll)
+
+      const response = await app.inject({ method: 'GET', url })
+
+      expect(response.statusCode).toBe(401)
+      expect(adminUsersService.list).not.toHaveBeenCalled()
+      expect(adminUsersService.summary).not.toHaveBeenCalled()
+      expect(adminUsersService.detail).not.toHaveBeenCalled()
+    }
+  )
+
+  it('the guard runs before validation, so a bad query is a 401 and not a 400 for a stranger', async () => {
+    const app = await buildApp(denyAll)
+
+    const bad = await app.inject({
+      method: 'GET',
+      url: '/admin/users?page=0&filter=banana'
+    })
+    const badId = await app.inject({ method: 'GET', url: '/admin/users/x' })
+
+    expect(bad.statusCode).toBe(401)
+    expect(badId.statusCode).toBe(401)
+  })
+})
+
+describe('GET /admin/users', () => {
+  it('applies the defaults and answers the service result', async () => {
+    const app = await buildApp(allowAdmin)
+    adminUsersService.list.mockResolvedValue({
+      items: [],
+      page: 1,
+      pageSize: 20,
+      total: 72
+    })
+
+    const response = await app.inject({ method: 'GET', url: '/admin/users' })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({ total: 72, pageSize: 20 })
+    expect(adminUsersService.list).toHaveBeenCalledWith({
+      q: undefined,
+      filter: 'all',
+      page: 1
+    })
+  })
+
+  it('parses and trims the parameters', async () => {
+    const app = await buildApp(allowAdmin)
+
+    await app.inject({
+      method: 'GET',
+      url: '/admin/users?q=%20kenzo%20&filter=noTerms&page=3'
+    })
+
+    expect(adminUsersService.list).toHaveBeenCalledWith({
+      q: 'kenzo',
+      filter: 'noTerms',
+      page: 3
+    })
+  })
+
+  it.each([
+    '?page=0',
+    '?page=10001',
+    '?page=abc',
+    '?filter=suspended',
+    `?q=${'a'.repeat(101)}`
+  ])('rejects %s with a 400 and never reaches the service', async query => {
+    const app = await buildApp(allowAdmin)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/admin/users${query}`
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(adminUsersService.list).not.toHaveBeenCalled()
+  })
+
+  it('a failure in the service is a 500 with the generic message, no internals', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminUsersService.list.mockRejectedValue(
+      new Error('relation "users" does not exist')
+    )
+
+    const response = await app.inject({ method: 'GET', url: '/admin/users' })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().message).toBe('Internal server error')
+  })
+})
+
+describe('GET /admin/users/summary', () => {
+  it('answers the service result', async () => {
+    const app = await buildApp(allowAdmin)
+    adminUsersService.summary.mockResolvedValue({ total: 72, active7d: 4 })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/users/summary'
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ total: 72, active7d: 4 })
+  })
+
+  it('a failure in the service is a 500 with the generic message', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminUsersService.summary.mockRejectedValue(new Error('connection refused'))
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/users/summary'
+    })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().message).toBe('Internal server error')
+  })
+})
+
+describe('GET /admin/users/:id', () => {
+  it('passes the id to the service', async () => {
+    const app = await buildApp(allowAdmin)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/admin/users/${USER_ID}`
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(adminUsersService.detail).toHaveBeenCalledWith(USER_ID)
+  })
+
+  it('rejects an id that is not a uuid with a 400', async () => {
+    const app = await buildApp(allowAdmin)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/users/nope'
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(adminUsersService.detail).not.toHaveBeenCalled()
+  })
+
+  it('a missing user is the 404 the service raised', async () => {
+    const app = await buildApp(allowAdmin)
+    adminUsersService.detail.mockRejectedValue(
+      new ClientError('Usuário não encontrado.', 404)
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/admin/users/${USER_ID}`
+    })
+
+    expect(response.statusCode).toBe(404)
+  })
+
+  it('a failure in the service is a 500 with the generic message', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminUsersService.detail.mockRejectedValue(new Error('boom'))
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/admin/users/${USER_ID}`
+    })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().message).toBe('Internal server error')
   })
 })

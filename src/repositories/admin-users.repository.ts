@@ -1,0 +1,99 @@
+import { prisma } from '../database/db'
+import type { Prisma } from '../database/prisma-client'
+
+export class AdminUsersRepository {
+  findPage(where: Prisma.UserWhereInput, skip: number, take: number) {
+    return prisma.$transaction([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+        select: {
+          id: true,
+          userName: true,
+          email: true,
+          emailVerifiedAt: true,
+          role: true,
+          termsVersion: true,
+          createdAt: true,
+          _count: { select: { userGames: true } },
+          accounts: { select: { platform: true } }
+        }
+      })
+    ])
+  }
+
+  async lastSeen(userIds: string[]): Promise<Map<string, Date>> {
+    if (userIds.length === 0) return new Map()
+    const rows = await prisma.refreshToken.groupBy({
+      by: ['userId'],
+      where: { userId: { in: userIds } },
+      _max: { createdAt: true }
+    })
+    return new Map(
+      rows.flatMap(row =>
+        row._max.createdAt ? [[row.userId, row._max.createdAt] as const] : []
+      )
+    )
+  }
+
+  summaryCounts(activeSince: Date) {
+    return prisma.$transaction([
+      prisma.user.count(),
+      prisma.user.count({
+        where: { refreshToken: { some: { createdAt: { gte: activeSince } } } }
+      })
+    ])
+  }
+
+  findDetail(userId: string, now: Date) {
+    return Promise.all([
+      prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          userName: true,
+          email: true,
+          emailVerifiedAt: true,
+          role: true,
+          hasPassword: true,
+          googleId: true,
+          discordId: true,
+          termsAcceptedAt: true,
+          termsVersion: true,
+          createdAt: true
+        }
+      }),
+      prisma.userGame.groupBy({
+        by: ['userGamesStatusId'],
+        where: { userId },
+        orderBy: { userGamesStatusId: 'asc' },
+        _count: { id: true }
+      }),
+      prisma.userGamesStatus.findMany({ select: { id: true, status: true } }),
+      prisma.platformAccountHours.aggregate({
+        where: { platformAccount: { userId } },
+        _sum: { hoursPlayed: true }
+      }),
+      prisma.refreshToken.count({
+        where: { userId, isValid: true, expiresAt: { gt: now } }
+      }),
+      prisma.platformAccount.findMany({
+        where: { userId },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          platform: true,
+          displayName: true,
+          createdAt: true,
+          statsSyncedAt: true
+        }
+      }),
+      prisma.refreshToken.aggregate({
+        where: { userId },
+        _max: { createdAt: true }
+      })
+    ])
+  }
+}
