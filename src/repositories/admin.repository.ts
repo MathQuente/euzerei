@@ -13,4 +13,13 @@ export class AdminRepository {
       }
     })
   }
+
+  async findHandles(userIds: string[]): Promise<Map<string, string>> {
+    if (userIds.length === 0) return new Map()
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, userName: true }
+    })
+    return new Map(users.map(user => [user.id, user.userName]))
+  }
 }
