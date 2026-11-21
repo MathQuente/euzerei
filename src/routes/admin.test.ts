@@ -11,8 +11,10 @@ const adminImportsService = vi.hoisted(() => ({
   list: vi.fn(),
   summary: vi.fn(),
   failures: vi.fn(),
-  queues: vi.fn()
+  queues: vi.fn(),
+  failedJobs: vi.fn()
 }))
+const adminHealthService = vi.hoisted(() => ({ health: vi.fn() }))
 const adminUsersService = vi.hoisted(() => ({
   list: vi.fn(),
   summary: vi.fn(),
@@ -44,7 +46,16 @@ vi.mock('../services/admin-imports.service', () => ({
     summary = adminImportsService.summary
     failures = adminImportsService.failures
     queues = adminImportsService.queues
+    failedJobs = adminImportsService.failedJobs
   }
+}))
+vi.mock('../services/admin-health.service', () => ({
+  AdminHealthService: class {
+    health = adminHealthService.health
+  }
+}))
+vi.mock('../repositories/admin-health.repository', () => ({
+  AdminHealthRepository: class {}
 }))
 vi.mock('../services/admin-users.service', () => ({
   AdminUsersService: class {
@@ -99,6 +110,10 @@ beforeEach(() => {
   adminImportsService.summary.mockReset().mockResolvedValue({ queued: 0 })
   adminImportsService.failures.mockReset().mockResolvedValue({ total: 0 })
   adminImportsService.queues.mockReset().mockResolvedValue({ queues: [] })
+  adminImportsService.failedJobs
+    .mockReset()
+    .mockResolvedValue({ total: 0, items: [], unavailable: [] })
+  adminHealthService.health.mockReset().mockResolvedValue({ api: {} })
   adminUsersService.list
     .mockReset()
     .mockResolvedValue({ items: [], page: 1, pageSize: 20, total: 0 })
@@ -392,6 +407,140 @@ describe('the other import reads', () => {
 
     expect(response.statusCode).toBe(503)
     expect(response.json().message).toBe('Não foi possível ler as filas agora.')
+  })
+})
+
+describe('the health and failed-job reads are behind the admin guard', () => {
+  it.each(['/admin/health', '/admin/queues/failed'])(
+    '%s answers 401 and never reaches the service',
+    async url => {
+      const app = await buildApp(denyAll)
+
+      const response = await app.inject({ method: 'GET', url })
+
+      expect(response.statusCode).toBe(401)
+      expect(adminHealthService.health).not.toHaveBeenCalled()
+      expect(adminImportsService.failedJobs).not.toHaveBeenCalled()
+    }
+  )
+
+  it('a bad store is a 401, not a 400, for a stranger', async () => {
+    const app = await buildApp(denyAll)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/queues/failed?store=epic'
+    })
+
+    expect(response.statusCode).toBe(401)
+  })
+})
+
+describe('GET /admin/health', () => {
+  it('answers the service result', async () => {
+    const app = await buildApp(allowAdmin)
+    adminHealthService.health.mockResolvedValue({
+      database: { status: 'down' }
+    })
+
+    const response = await app.inject({ method: 'GET', url: '/admin/health' })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ database: { status: 'down' } })
+  })
+
+  it('a failure in the service is a 500 with the generic message, no internals', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminHealthService.health.mockRejectedValue(new Error('pg_stat_activity'))
+
+    const response = await app.inject({ method: 'GET', url: '/admin/health' })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().message).toBe('Internal server error')
+  })
+})
+
+describe('GET /admin/queues', () => {
+  it('a failure in the service is a 500 with the generic message, no internals', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminImportsService.queues.mockRejectedValue(new Error('WRONGTYPE'))
+
+    const response = await app.inject({ method: 'GET', url: '/admin/queues' })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().message).toBe('Internal server error')
+  })
+})
+
+describe('GET /admin/queues/failed', () => {
+  it('answers the service result without a filter', async () => {
+    const app = await buildApp(allowAdmin)
+    adminImportsService.failedJobs.mockResolvedValue({
+      total: 4,
+      items: [],
+      unavailable: []
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/queues/failed'
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json().total).toBe(4)
+    expect(adminImportsService.failedJobs).toHaveBeenCalledWith(undefined)
+  })
+
+  it('passes the store and treats an empty one as absent', async () => {
+    const app = await buildApp(allowAdmin)
+
+    await app.inject({ method: 'GET', url: '/admin/queues/failed?store=psn' })
+    await app.inject({ method: 'GET', url: '/admin/queues/failed?store=' })
+
+    expect(adminImportsService.failedJobs).toHaveBeenNthCalledWith(1, 'psn')
+    expect(adminImportsService.failedJobs).toHaveBeenNthCalledWith(2, undefined)
+  })
+
+  it('answers 400 for a store that does not exist', async () => {
+    const app = await buildApp(allowAdmin)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/queues/failed?store=epic'
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(adminImportsService.failedJobs).not.toHaveBeenCalled()
+  })
+
+  it('an unavailable queue is a 503 with the message', async () => {
+    const app = await buildApp(allowAdmin)
+    adminImportsService.failedJobs.mockRejectedValue(
+      new ClientError('Não foi possível ler as filas agora.', 503)
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/queues/failed'
+    })
+
+    expect(response.statusCode).toBe(503)
+  })
+
+  it('a failure in the service is a 500 with the generic message', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminImportsService.failedJobs.mockRejectedValue(new Error('WRONGTYPE'))
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/queues/failed'
+    })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().message).toBe('Internal server error')
   })
 })
 

@@ -53,7 +53,9 @@ function setup(jobs: ImportJobRecord[], handles = new Map([['u1', 'ada']])) {
             (j.finishedOn ?? 0) >= since
         ).length
     ),
-    workers: vi.fn(async () => 1)
+    failedCount: vi.fn(async (store: ImportStore) => counts(store).failed),
+    workers: vi.fn(async () => 1),
+    isPaused: vi.fn<(store: ImportStore) => Promise<boolean>>(async () => false)
   }
   const lookup = { findHandles: vi.fn(async () => handles) }
   const service = new AdminImportsService(
@@ -295,9 +297,11 @@ describe('when Redis does not answer', () => {
     const hang = () => new Promise<never>(() => {})
     const repo = {
       counts: hang,
+      failedCount: hang,
       newest: hang,
       finishedSince: hang,
-      workers: hang
+      workers: hang,
+      isPaused: hang
     }
     const service = new AdminImportsService(
       repo as unknown as ImportQueueRepository,
@@ -308,7 +312,8 @@ describe('when Redis does not answer', () => {
       () => service.list({ page: 1 }),
       () => service.summary(),
       () => service.failures(),
-      () => service.queues()
+      () => service.queues(),
+      () => service.failedJobs(undefined)
     ]) {
       const outcome = expect(read()).rejects.toMatchObject({ statusCode: 503 })
       await vi.advanceTimersByTimeAsync(QUEUE_READ_TIMEOUT_MS)
@@ -331,7 +336,13 @@ describe('when Redis does not answer', () => {
             failed: 0
           })
     }
-    const repo = { counts, newest: async () => [], workers: async () => 1 }
+    const repo = {
+      counts,
+      newest: async () => [],
+      workers: async () => 1,
+      isPaused: async () => false,
+      finishedSince: async () => 0
+    }
     const service = new AdminImportsService(
       repo as unknown as ImportQueueRepository,
       { findHandles: async () => new Map() }
@@ -347,15 +358,191 @@ describe('when Redis does not answer', () => {
 })
 
 describe('AdminImportsService.queues', () => {
-  it('returns each queue with its counts and workers', async () => {
-    const { service } = setup([
+  const now = new Date('2026-11-21T15:00:00.000Z')
+
+  it('returns each queue with its counts, state, workers and the last 24 hours', async () => {
+    const { service, repo } = setup([
       job({}),
       job({ id: 'x', store: 'psn', state: 'failed', returnValue: null })
     ])
-    const { queues } = await service.queues()
+    const { queues, generatedAt } = await service.queues(now)
 
+    expect(generatedAt).toBe(now.toISOString())
     expect(queues.map(q => q.store)).toEqual(['steam', 'xbox', 'psn'])
-    expect(queues[0]).toMatchObject({ completed: 1, failed: 0, workers: 1 })
+    expect(queues[0]).toMatchObject({
+      completed: 1,
+      failed: 0,
+      workers: 1,
+      paused: false,
+      error: null
+    })
     expect(queues[2]).toMatchObject({ failed: 1 })
+    expect(repo.finishedSince).toHaveBeenCalledWith(
+      'steam',
+      'completed',
+      now.getTime() - 24 * 60 * 60 * 1000
+    )
+  })
+
+  it('counts only what finished inside the rolling 24 hours', async () => {
+    const day = 24 * 60 * 60 * 1000
+    const { service } = setup([
+      job({ id: 'new', finishedOn: now.getTime() - 1_000 }),
+      job({ id: 'old', finishedOn: now.getTime() - day - 1_000 })
+    ])
+    const { queues } = await service.queues(now)
+
+    expect(queues[0]).toMatchObject({ completed: 2, completed24h: 1 })
+  })
+
+  it('reports a paused queue', async () => {
+    const { service, repo } = setup([])
+    repo.isPaused.mockImplementation(async store => store === 'xbox')
+
+    const { queues } = await service.queues(now)
+
+    expect(queues.map(q => q.paused)).toEqual([false, true, false])
+  })
+
+  it('an empty queue is zeros, not an error', async () => {
+    const { service } = setup([])
+    const { queues } = await service.queues(now)
+
+    expect(queues[1]).toMatchObject({
+      waiting: 0,
+      active: 0,
+      failed: 0,
+      completed24h: 0,
+      error: null
+    })
+  })
+
+  it('a queue that fails alone becomes a row with an error and the others still answer', async () => {
+    const { service, repo } = setup([job({})])
+    const original = repo.counts.getMockImplementation()!
+    repo.counts.mockImplementation(async store => {
+      if (store === 'xbox') throw new Error('WRONGTYPE secret detail')
+      return original(store)
+    })
+
+    const { queues } = await service.queues(now)
+
+    expect(queues[0]).toMatchObject({ completed: 1, error: null })
+    expect(queues[1]).toMatchObject({
+      store: 'xbox',
+      waiting: null,
+      failed: null,
+      workers: null,
+      error: 'Não foi possível ler esta fila.'
+    })
+    expect(JSON.stringify(queues)).not.toContain('WRONGTYPE')
+    expect(queues[2]).toMatchObject({ error: null })
+  })
+
+  it('shares one read inside the cache window', async () => {
+    const { service, repo } = setup([])
+    await service.queues(now)
+    await service.queues(now)
+
+    expect(repo.isPaused).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('AdminImportsService.failedJobs', () => {
+  const now = new Date('2026-11-21T15:00:00.000Z')
+  const failed = (id: string, overrides: Partial<ImportJobRecord> = {}) =>
+    job({
+      id,
+      state: 'failed',
+      failedReason: 'Perfil privado',
+      returnValue: { library: { imported: 1 } },
+      ...overrides
+    })
+
+  it('lists the newest failures with a short ref, the handle and the reason', async () => {
+    const { service } = setup([
+      failed('steam-import-u1', { finishedOn: 5_000 }),
+      failed('psn-import-u1', { store: 'psn', finishedOn: 9_000 })
+    ])
+    const result = await service.failedJobs(undefined, now)
+
+    expect(result.total).toBe(2)
+    expect(result.unavailable).toEqual([])
+    expect(result.items.map(i => i.store)).toEqual(['psn', 'steam'])
+    expect(result.items[0]).toEqual({
+      ref: expect.stringMatching(/^psn-import:[0-9a-f]{4}$/),
+      store: 'psn',
+      handle: 'ada',
+      reason: 'Perfil privado',
+      attempts: { made: 1, max: 2 },
+      failedAt: new Date(9_000).toISOString()
+    })
+  })
+
+  it('never carries the job id, the user id, the job data or the return value', async () => {
+    const { service } = setup([
+      failed('steam-import-u1', { returnValue: { token: 'tok-secret' } })
+    ])
+    const text = JSON.stringify(await service.failedJobs(undefined, now))
+
+    expect(text).not.toContain('steam-import-u1')
+    expect(text).not.toContain('"u1"')
+    expect(text).not.toContain('tok-secret')
+  })
+
+  it('keeps the 10 newest of the failures Redis holds and says how many there are', async () => {
+    const jobs = Array.from({ length: 14 }, (_, n) =>
+      failed(`steam-import-u${n}`, { userId: `u${n}`, finishedOn: 1_000 + n })
+    )
+    const { service, repo } = setup(jobs)
+    const result = await service.failedJobs('steam', now)
+
+    expect(result.total).toBe(14)
+    expect(result.items).toHaveLength(10)
+    expect(result.items[0]?.failedAt).toBe(new Date(1_013).toISOString())
+    expect(repo.newest).toHaveBeenCalledWith('steam', 'failed', 10)
+    expect(repo.failedCount).toHaveBeenCalledTimes(1)
+    expect(repo.counts).not.toHaveBeenCalled()
+  })
+
+  it('a deleted account has no handle', async () => {
+    const { service } = setup([failed('steam-import-u9', { userId: 'u9' })])
+    const result = await service.failedJobs(undefined, now)
+
+    expect(result.items[0]?.handle).toBeNull()
+  })
+
+  it('cuts a long reason and treats a blank one as no reason', async () => {
+    const { service } = setup([
+      failed('steam-import-u1', { failedReason: 'x'.repeat(500) }),
+      failed('xbox-import-u1', { store: 'xbox', failedReason: '  ' })
+    ])
+    const result = await service.failedJobs(undefined, now)
+    const reasons = result.items.map(i => i.reason)
+
+    expect(reasons).toContain(null)
+    expect(reasons.find(r => r !== null)?.length).toBe(160)
+  })
+
+  it('no failure is an empty list and no handle lookup is needed', async () => {
+    const { service, lookup } = setup([job({})])
+    const result = await service.failedJobs(undefined, now)
+
+    expect(result).toMatchObject({ total: 0, items: [], unavailable: [] })
+    expect(lookup.findHandles).toHaveBeenCalledWith([])
+  })
+
+  it('a queue that fails alone is listed as unavailable and the others answer', async () => {
+    const { service, repo } = setup([failed('steam-import-u1')])
+    const original = repo.failedCount.getMockImplementation()!
+    repo.failedCount.mockImplementation(async store => {
+      if (store === 'psn') throw new Error('boom')
+      return original(store)
+    })
+
+    const result = await service.failedJobs(undefined, now)
+
+    expect(result.unavailable).toEqual(['psn'])
+    expect(result.items).toHaveLength(1)
   })
 })

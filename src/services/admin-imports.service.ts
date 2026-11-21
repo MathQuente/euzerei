@@ -25,6 +25,8 @@ import {
 import { createTtlCache } from '../utils/ttl-cache'
 import { TimeoutError, withTimeout } from '../utils/with-timeout'
 import { ClientError } from '../errors/client-error'
+import { FAILED_JOBS_LIMIT } from '../schemas/admin-queues.schema'
+import { jobRef, truncateReason } from '../utils/admin-job-ref'
 
 export const SUMMARY_TTL_MS = 10_000
 export const QUEUE_READ_TIMEOUT_MS = 5_000
@@ -32,6 +34,8 @@ const QUEUE_UNAVAILABLE = 'Não foi possível ler as filas agora.'
 export const DURATION_SAMPLE = 50
 export const FAILURE_SAMPLE_PER_STORE = 100
 const NO_REASON = 'Motivo não registrado'
+const QUEUE_ROW_ERROR = 'Não foi possível ler esta fila.'
+const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface HandleLookup {
   findHandles(userIds: string[]): Promise<Map<string, string>>
@@ -258,20 +262,110 @@ export class AdminImportsService {
     }
   }
 
-  queues() {
-    return this.cached('queues', () => readQueues(() => this.buildQueues()))
+  queues(now: Date = new Date()) {
+    return this.cached('queues', () => readQueues(() => this.buildQueues(now)))
   }
 
-  private async buildQueues() {
-    const counts = await this.allCounts()
-    const workers = await Promise.all(
-      IMPORT_STORES.map(store => this.queueRepository.workers(store))
-    )
-    return {
-      queues: IMPORT_STORES.map((store, index) => ({
+  private async readQueueRow(store: ImportStore, since: number) {
+    try {
+      const [counts, paused, workers, completed24h, failed24h] =
+        await Promise.all([
+          this.queueRepository.counts(store),
+          this.queueRepository.isPaused(store),
+          this.queueRepository.workers(store),
+          this.queueRepository.finishedSince(store, 'completed', since),
+          this.queueRepository.finishedSince(store, 'failed', since)
+        ])
+      return {
         store,
-        ...counts[store],
-        workers: workers[index]
+        ...counts,
+        paused,
+        workers,
+        completed24h,
+        failed24h,
+        error: null
+      }
+    } catch {
+      return {
+        store,
+        waiting: null,
+        active: null,
+        delayed: null,
+        completed: null,
+        failed: null,
+        paused: null,
+        workers: null,
+        completed24h: null,
+        failed24h: null,
+        error: QUEUE_ROW_ERROR
+      }
+    }
+  }
+
+  private async buildQueues(now: Date) {
+    const since = now.getTime() - DAY_MS
+    const queues = await Promise.all(
+      IMPORT_STORES.map(store => this.readQueueRow(store, since))
+    )
+    return { generatedAt: now.toISOString(), queues }
+  }
+
+  failedJobs(store: ImportStore | undefined, now: Date = new Date()) {
+    return this.cached(`failed:${store ?? 'all'}`, () =>
+      readQueues(() => this.buildFailedJobs(store, now))
+    )
+  }
+
+  private async readFailed(store: ImportStore) {
+    try {
+      const failed = await this.queueRepository.failedCount(store)
+      const records =
+        failed > 0
+          ? await this.queueRepository.newest(
+              store,
+              'failed',
+              Math.min(FAILED_JOBS_LIMIT, failed)
+            )
+          : []
+      return { store, total: failed, records, ok: true as const }
+    } catch {
+      return { store, total: 0, records: [], ok: false as const }
+    }
+  }
+
+  private async buildFailedJobs(store: ImportStore | undefined, now: Date) {
+    const stores = store ? [store] : [...IMPORT_STORES]
+    const reads = await Promise.all(stores.map(item => this.readFailed(item)))
+
+    const records = reads
+      .flatMap(read => read.records)
+      .sort((a, b) => sortKeyOf(b) - sortKeyOf(a))
+      .slice(0, FAILED_JOBS_LIMIT)
+
+    const ids = [
+      ...new Set(
+        records
+          .map(record => record.userId)
+          .filter((id): id is string => id !== null)
+      )
+    ]
+    const handles = await this.handles.findHandles(ids)
+
+    return {
+      generatedAt: now.toISOString(),
+      total: reads.reduce((sum, read) => sum + read.total, 0),
+      unavailable: reads.filter(read => !read.ok).map(read => read.store),
+      items: records.map(record => ({
+        ref: jobRef(record.store, record.id),
+        store: record.store,
+        handle:
+          record.userId === null ? null : (handles.get(record.userId) ?? null),
+        reason: truncateReason(record.failedReason),
+        attempts: { made: record.attemptsMade, max: record.maxAttempts },
+        failedAt:
+          record.finishedOn === null
+            ? null
+            : new Date(record.finishedOn).toISOString()
       }))
     }
   }
