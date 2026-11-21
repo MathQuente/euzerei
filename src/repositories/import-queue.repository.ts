@@ -84,6 +84,14 @@ export class ImportQueueRepository {
     return this.redis.zcount(this.queues[store].toKey(state), since, '+inf')
   }
 
+  failedCount(store: ImportStore): Promise<number> {
+    return this.queues[store].getFailedCount()
+  }
+
+  isPaused(store: ImportStore): Promise<boolean> {
+    return this.queues[store].isPaused()
+  }
+
   async workers(store: ImportStore): Promise<number | null> {
     try {
       return (await this.queues[store].getWorkers()).length

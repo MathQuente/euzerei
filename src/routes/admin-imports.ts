@@ -6,13 +6,16 @@ import { AdminRepository } from '../repositories/admin.repository'
 import { ImportQueueRepository } from '../repositories/import-queue.repository'
 import { AdminImportsService } from '../services/admin-imports.service'
 
+let shared: AdminImportsController | undefined
+
 function buildController() {
-  return new AdminImportsController(
+  shared ??= new AdminImportsController(
     new AdminImportsService(
       new ImportQueueRepository(importQueues, importQueuesRedis),
       new AdminRepository()
     )
   )
+  return shared
 }
 
 export async function adminImportsRoutes(app: FastifyInstance) {
@@ -34,4 +37,7 @@ export async function adminQueuesRoutes(app: FastifyInstance) {
   app
     .withTypeProvider<ZodTypeProvider>()
     .get('/', async (request, reply) => controller.queues(request, reply))
+    .get('/failed', async (request, reply) =>
+      controller.failedJobs(request, reply)
+    )
 }

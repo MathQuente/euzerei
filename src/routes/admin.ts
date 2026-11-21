@@ -4,6 +4,7 @@ import { buildPanelAuthController } from './panel-auth'
 import { adminAuditRoutes } from './admin-audit'
 import { adminSettingsRoutes } from './admin-settings'
 import { adminUsersRoutes } from './admin-users'
+import { adminHealthRoutes } from './admin-health'
 import { adminImportsRoutes, adminQueuesRoutes } from './admin-imports'
 
 export async function adminRoutes(app: FastifyInstance) {
@@ -17,6 +18,7 @@ export async function adminRoutes(app: FastifyInstance) {
       panelAuthController.me(request, reply)
     )
 
+  app.register(adminHealthRoutes, { prefix: '/health' })
   app.register(adminAuditRoutes, { prefix: '/audit' })
   app.register(adminImportsRoutes, { prefix: '/imports' })
   app.register(adminQueuesRoutes, { prefix: '/queues' })
