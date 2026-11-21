@@ -84,9 +84,18 @@ export class UserController {
   async getPublicUserGames(request: FastifyRequest, reply: FastifyReply) {
     const { userId: ref } = UserSchema.UserParamsSchema.parse(request.params)
     const userId = await this.userService.resolveUserRef(ref)
+    const { pageIndex, query, filter, platforms, sortBy, sortOrder } =
+      UserSchema.QueryStringSchema.parse(request.query)
 
     const { totalPerStatus, games, total } =
-      await this.userService.findPublicUserGames(userId)
+      await this.userService.findPublicUserGames(userId, {
+        pageIndex,
+        filter,
+        query,
+        platforms,
+        sortBy,
+        sortOrder
+      })
 
     return reply.status(200).send({ totalPerStatus, games, total })
   }

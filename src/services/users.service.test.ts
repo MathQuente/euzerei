@@ -1234,7 +1234,7 @@ describe('UserService dropped date in the list', () => {
 })
 
 describe('UserService.findPublicUserGames', () => {
-  it('asks the repository for 6 games per status and returns no library ids', async () => {
+  it('asks the repository for 8 games per status and returns no library ids', async () => {
     const findManyGamesOfUser = vi.fn().mockResolvedValue([])
     const userRepository = fakeUserRepository({
       findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
@@ -1261,6 +1261,37 @@ describe('UserService.findPublicUserGames', () => {
     )
     expect(result).not.toHaveProperty('libraryIgdbIds')
     expect(userRepository.findLibraryIgdbIds).not.toHaveBeenCalled()
+  })
+
+  it('lists one status page by page and still leaves dropped games out', async () => {
+    const findManyGamesOfUser = vi.fn().mockResolvedValue([])
+    const service = new UserService(
+      fakeUserRepository({
+        findUserById: vi.fn().mockResolvedValue({ id: 'user-1' }),
+        findManyGamesOfUser,
+        findGamesCountByStatus: vi.fn().mockResolvedValue(statusCounts({})),
+        countGamesOfUser: vi.fn().mockResolvedValue(0)
+      }),
+      fakeRatingRepository(),
+      fakeGameCacheService(),
+      fakeFollowRepository()
+    )
+
+    await service.findPublicUserGames('user-1', {
+      filter: 'PLAYED',
+      pageIndex: 1,
+      query: 'zelda'
+    })
+
+    expect(findManyGamesOfUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filter: 'PLAYED',
+        query: 'zelda',
+        skip: expect.any(Number),
+        excludeStatuses: ['DROPPED'],
+        previewPerStatus: undefined
+      })
+    )
   })
 
   it('never asks for dropped games and does not count them', async () => {
