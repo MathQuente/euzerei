@@ -1,5 +1,6 @@
 import { prisma } from '../database/db'
 import type { Prisma } from '../database/prisma-client'
+import { buildAdminUsersWhere } from '../utils/admin-users-where'
 
 export class AdminUsersRepository {
   findPage(where: Prisma.UserWhereInput, skip: number, take: number) {
@@ -23,6 +24,12 @@ export class AdminUsersRepository {
         }
       })
     ])
+  }
+
+  countWithoutCurrentTerms() {
+    return prisma.user.count({
+      where: buildAdminUsersWhere({ filter: 'noTerms' })
+    })
   }
 
   async lastSeen(userIds: string[]): Promise<Map<string, Date>> {

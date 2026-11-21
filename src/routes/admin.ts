@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { ZodTypeProvider } from 'fastify-type-provider-zod'
 import { buildPanelAuthController } from './panel-auth'
 import { adminAuditRoutes } from './admin-audit'
+import { adminSettingsRoutes } from './admin-settings'
 import { adminUsersRoutes } from './admin-users'
 import { adminImportsRoutes, adminQueuesRoutes } from './admin-imports'
 
@@ -20,4 +21,5 @@ export async function adminRoutes(app: FastifyInstance) {
   app.register(adminImportsRoutes, { prefix: '/imports' })
   app.register(adminQueuesRoutes, { prefix: '/queues' })
   app.register(adminUsersRoutes, { prefix: '/users' })
+  app.register(adminSettingsRoutes, { prefix: '/settings' })
 }
