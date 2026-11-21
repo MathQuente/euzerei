@@ -3,20 +3,24 @@ import { ZodError } from 'zod'
 import { AppSettingsService } from './app-settings.service'
 import { APP_SETTING_DEFAULTS } from '../schemas/app-settings.schema'
 import type { AppSettingsRepository } from '../repositories/app-settings.repository'
-import type { AuditService } from './audit.service'
 
-const repository = { findAll: vi.fn(), upsertMany: vi.fn() }
-const audit = { record: vi.fn() }
+const tx = { id: 'tx' }
+const repository = {
+  findAll: vi.fn(),
+  runExclusive: vi.fn(),
+  saveWithAudit: vi.fn()
+}
 
 const service = new AppSettingsService(
-  repository as unknown as AppSettingsRepository,
-  audit as unknown as AuditService
+  repository as unknown as AppSettingsRepository
 )
 
 beforeEach(() => {
   repository.findAll.mockReset().mockResolvedValue([])
-  repository.upsertMany.mockReset().mockResolvedValue([])
-  audit.record.mockReset().mockResolvedValue(undefined)
+  repository.runExclusive
+    .mockReset()
+    .mockImplementation(async (work: (t: unknown) => unknown) => work(tx))
+  repository.saveWithAudit.mockReset().mockResolvedValue(undefined)
 })
 
 describe('AppSettingsService.getAll', () => {
@@ -55,38 +59,96 @@ describe('AppSettingsService.getAll', () => {
 })
 
 describe('AppSettingsService.update', () => {
-  it('validates, stores the changes with the actor and audits the keys', async () => {
-    await service.update(
+  it('stores only what changed, with the actor, and audits before and after in the same write', async () => {
+    const result = await service.update(
       'admin-1',
-      { signupsOpen: false, importAutoRetry: false },
+      { signupsOpen: false, importAutoRetry: false, popularSyncTime: '03:00' },
       '1.2.3.4'
     )
 
-    expect(repository.upsertMany).toHaveBeenCalledWith(
+    expect(repository.saveWithAudit).toHaveBeenCalledTimes(1)
+    expect(repository.saveWithAudit).toHaveBeenCalledWith(
+      tx,
       { signupsOpen: false, importAutoRetry: false },
-      'admin-1'
+      'admin-1',
+      {
+        action: 'Alterou configurações',
+        area: 'SYSTEM',
+        detail: 'signupsOpen: true → false, importAutoRetry: true → false',
+        ip: '1.2.3.4'
+      }
     )
-    expect(audit.record).toHaveBeenCalledWith({
-      actorId: 'admin-1',
-      action: 'Alterou configurações',
-      area: 'SYSTEM',
-      detail: 'signupsOpen, importAutoRetry',
-      ip: '1.2.3.4'
-    })
+    expect(result.changed).toEqual(['signupsOpen', 'importAutoRetry'])
   })
 
-  it('stores nothing and audits nothing for an invalid value', async () => {
+  it('reads, compares and writes inside one exclusive transaction', async () => {
+    await service.update('admin-1', { signupsOpen: false }, 'ip')
+
+    expect(repository.runExclusive).toHaveBeenCalledTimes(1)
+    expect(repository.findAll).toHaveBeenCalledWith(tx)
+    expect(repository.saveWithAudit.mock.calls[0][0]).toBe(tx)
+  })
+
+  it('compares against the stored value, not only the default', async () => {
+    repository.findAll.mockResolvedValue([
+      { key: 'importsPerUserPerHour', value: 9 }
+    ])
+
+    await service.update('admin-1', { importsPerUserPerHour: 5 }, 'ip')
+
+    expect(repository.saveWithAudit).toHaveBeenCalledWith(
+      tx,
+      { importsPerUserPerHour: 5 },
+      'admin-1',
+      expect.objectContaining({ detail: 'importsPerUserPerHour: 9 → 5' })
+    )
+  })
+
+  it('quotes strings in the audit detail', async () => {
+    await service.update('admin-1', { popularSyncTime: '04:30' }, 'ip')
+
+    expect(repository.saveWithAudit).toHaveBeenCalledWith(
+      tx,
+      { popularSyncTime: '04:30' },
+      'admin-1',
+      expect.objectContaining({
+        detail: 'popularSyncTime: "03:00" → "04:30"'
+      })
+    )
+  })
+
+  it('writes nothing and audits nothing when every value is already the current one, and says nothing changed', async () => {
+    const result = await service.update(
+      'admin-1',
+      { signupsOpen: true, importsPerUserPerHour: 5 },
+      'ip'
+    )
+
+    expect(repository.saveWithAudit).not.toHaveBeenCalled()
+    expect(result.settings).toEqual(APP_SETTING_DEFAULTS)
+    expect(result.changed).toEqual([])
+  })
+
+  it('stores nothing, and does not even open the transaction, for an invalid value', async () => {
     await expect(
-      service.update('admin-1', { importsPerUserPerHour: 0 }, '1.2.3.4')
+      service.update('admin-1', { importsPerUserPerHour: 0 }, 'ip')
     ).rejects.toBeInstanceOf(ZodError)
 
-    expect(repository.upsertMany).not.toHaveBeenCalled()
-    expect(audit.record).not.toHaveBeenCalled()
+    expect(repository.runExclusive).not.toHaveBeenCalled()
+    expect(repository.saveWithAudit).not.toHaveBeenCalled()
   })
 
   it('refuses an unknown key', async () => {
     await expect(
-      service.update('admin-1', { bannerText: 'oi' }, '1.2.3.4')
+      service.update('admin-1', { bannerText: 'oi' }, 'ip')
     ).rejects.toBeInstanceOf(ZodError)
+  })
+
+  it('a failed write propagates, so no change is reported as saved', async () => {
+    repository.saveWithAudit.mockRejectedValue(new Error('db down'))
+
+    await expect(
+      service.update('admin-1', { signupsOpen: false }, 'ip')
+    ).rejects.toThrow('db down')
   })
 })

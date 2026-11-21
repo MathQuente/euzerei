@@ -1,3 +1,4 @@
+import type { Prisma } from '../database/prisma-client'
 import { AppSettingsRepository } from '../repositories/app-settings.repository'
 import {
   APP_SETTING_DEFAULTS,
@@ -7,16 +8,56 @@ import {
   type AppSettingKey,
   type AppSettings
 } from '../schemas/app-settings.schema'
-import { AuditService } from './audit.service'
+
+export const UPDATE_SETTINGS_ACTION = 'Alterou configurações'
 
 export class AppSettingsService {
   constructor(
-    private appSettingsRepository: AppSettingsRepository = new AppSettingsRepository(),
-    private auditService: AuditService = new AuditService()
+    private appSettingsRepository: AppSettingsRepository = new AppSettingsRepository()
   ) {}
 
-  async getAll(): Promise<AppSettings> {
-    const rows = await this.appSettingsRepository.findAll()
+  getAll(): Promise<AppSettings> {
+    return this.read()
+  }
+
+  async update(
+    actorId: string,
+    input: unknown,
+    ip: string
+  ): Promise<{ settings: AppSettings; changed: AppSettingKey[] }> {
+    const requested = UpdateAppSettingsBodySchema.parse(input)
+
+    return this.appSettingsRepository.runExclusive(async tx => {
+      const current = await this.read(tx)
+      const changed = (Object.keys(requested) as AppSettingKey[]).filter(
+        key => requested[key] !== current[key]
+      )
+
+      if (changed.length === 0) return { settings: current, changed }
+
+      const values = Object.fromEntries(
+        changed.map(key => [key, requested[key]])
+      )
+      const detail = changed
+        .map(
+          key =>
+            `${key}: ${JSON.stringify(current[key])} → ${JSON.stringify(requested[key])}`
+        )
+        .join(', ')
+
+      await this.appSettingsRepository.saveWithAudit(tx, values, actorId, {
+        action: UPDATE_SETTINGS_ACTION,
+        area: 'SYSTEM',
+        detail,
+        ip
+      })
+
+      return { settings: await this.read(tx), changed }
+    })
+  }
+
+  private async read(client?: Prisma.TransactionClient): Promise<AppSettings> {
+    const rows = await this.appSettingsRepository.findAll(client)
     const stored = new Map(rows.map(row => [row.key, row.value]))
     const settings = { ...APP_SETTING_DEFAULTS } as Record<string, unknown>
 
@@ -27,21 +68,5 @@ export class AppSettingsService {
     }
 
     return settings as AppSettings
-  }
-
-  async update(actorId: string, input: unknown, ip: string) {
-    const changes = UpdateAppSettingsBodySchema.parse(input)
-    const keys = Object.keys(changes) as AppSettingKey[]
-
-    await this.appSettingsRepository.upsertMany(changes, actorId)
-    await this.auditService.record({
-      actorId,
-      action: 'Alterou configurações',
-      area: 'SYSTEM',
-      detail: keys.join(', '),
-      ip
-    })
-
-    return this.getAll()
   }
 }

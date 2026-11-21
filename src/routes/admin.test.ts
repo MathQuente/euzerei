@@ -18,6 +18,10 @@ const adminUsersService = vi.hoisted(() => ({
   summary: vi.fn(),
   detail: vi.fn()
 }))
+const adminSettingsService = vi.hoisted(() => ({
+  get: vi.fn(),
+  update: vi.fn()
+}))
 const panelAuthService = vi.hoisted(() => ({
   login: vi.fn(),
   logout: vi.fn(),
@@ -49,6 +53,12 @@ vi.mock('../services/admin-users.service', () => ({
     detail = adminUsersService.detail
   }
 }))
+vi.mock('../services/admin-settings.service', () => ({
+  AdminSettingsService: class {
+    get = adminSettingsService.get
+    update = adminSettingsService.update
+  }
+}))
 vi.mock('../services/panel-auth.service', () => ({
   PanelAuthService: class {
     login = panelAuthService.login
@@ -58,6 +68,7 @@ vi.mock('../services/panel-auth.service', () => ({
 }))
 
 import { adminRoutes } from './admin'
+import { AdminUpdateSettingsBodySchema } from '../schemas/admin-settings.schema'
 
 async function buildApp(
   authenticateAdmin: FastifyInstance['authenticateAdmin']
@@ -95,6 +106,12 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ total: 0, active7d: 0 })
   adminUsersService.detail.mockReset().mockResolvedValue({ id: USER_ID })
+  adminSettingsService.get
+    .mockReset()
+    .mockResolvedValue({ settings: {}, termsPending: 0 })
+  adminSettingsService.update
+    .mockReset()
+    .mockResolvedValue({ settings: {}, termsPending: 0 })
 })
 
 afterEach(() => vi.restoreAllMocks())
@@ -557,6 +574,142 @@ describe('GET /admin/users/:id', () => {
     const response = await app.inject({
       method: 'GET',
       url: `/admin/users/${USER_ID}`
+    })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().message).toBe('Internal server error')
+  })
+})
+
+describe('the settings routes are behind the admin guard', () => {
+  it.each([
+    ['GET', undefined],
+    ['PUT', { signupsOpen: false }]
+  ] as const)(
+    '%s /admin/settings answers 401 and never reaches the service',
+    async (method, payload) => {
+      const app = await buildApp(denyAll)
+
+      const response = await app.inject({
+        method,
+        url: '/admin/settings',
+        payload
+      })
+
+      expect(response.statusCode).toBe(401)
+      expect(adminSettingsService.get).not.toHaveBeenCalled()
+      expect(adminSettingsService.update).not.toHaveBeenCalled()
+    }
+  )
+
+  it('the guard runs before validation, so a bad body is a 401 and not a 400 for a stranger', async () => {
+    const app = await buildApp(denyAll)
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/settings',
+      payload: { importsPerUserPerHour: 0, bannerText: 'x' }
+    })
+
+    expect(response.statusCode).toBe(401)
+  })
+})
+
+describe('GET /admin/settings', () => {
+  it('answers the service result', async () => {
+    const app = await buildApp(allowAdmin)
+    adminSettingsService.get.mockResolvedValue({
+      settings: { signupsOpen: true },
+      termsPending: 3
+    })
+
+    const response = await app.inject({ method: 'GET', url: '/admin/settings' })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      settings: { signupsOpen: true },
+      termsPending: 3
+    })
+  })
+
+  it('a failure in the service is a 500 with the generic message, no internals', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminSettingsService.get.mockRejectedValue(
+      new Error('relation "app_settings" does not exist')
+    )
+
+    const response = await app.inject({ method: 'GET', url: '/admin/settings' })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().message).toBe('Internal server error')
+  })
+})
+
+describe('PUT /admin/settings', () => {
+  it('passes the actor, the body and the ip to the service', async () => {
+    const app = await buildApp(allowAdmin)
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/settings',
+      payload: { signupsOpen: false }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(adminSettingsService.update).toHaveBeenCalledWith(
+      'admin-1',
+      { signupsOpen: false },
+      expect.any(String)
+    )
+  })
+
+  it('answers the keys that really changed', async () => {
+    const app = await buildApp(allowAdmin)
+    adminSettingsService.update.mockResolvedValue({
+      settings: {},
+      termsPending: 0,
+      changed: []
+    })
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/settings',
+      payload: { signupsOpen: true }
+    })
+
+    expect(response.json().changed).toEqual([])
+  })
+
+  it('a validation error from the service is a 400 with the fields in error', async () => {
+    const app = await buildApp(allowAdmin)
+    adminSettingsService.update.mockImplementation(
+      async (_actor: string, body: unknown) =>
+        AdminUpdateSettingsBodySchema.parse(body)
+    )
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/settings',
+      payload: { importsPerUserPerHour: 0, popularSyncTime: '99:99' }
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error).toMatchObject({
+      importsPerUserPerHour: expect.any(Array),
+      popularSyncTime: expect.any(Array)
+    })
+  })
+
+  it('a failure in the service is a 500 with the generic message', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminSettingsService.update.mockRejectedValue(new Error('boom'))
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/admin/settings',
+      payload: { signupsOpen: false }
     })
 
     expect(response.statusCode).toBe(500)
