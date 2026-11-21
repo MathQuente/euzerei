@@ -630,7 +630,14 @@ export class UserService {
       sortOrder?: 'asc' | 'desc'
     } = {}
   ) {
-    const { pageIndex = 0, filter, query, platforms, sortBy, sortOrder } = params
+    const {
+      pageIndex = 0,
+      filter,
+      query,
+      platforms,
+      sortBy,
+      sortOrder
+    } = params
     const isOverview = !filter && !query && !platforms?.length
     return this.findManyUserGames(
       userId,

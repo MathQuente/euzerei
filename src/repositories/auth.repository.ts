@@ -114,7 +114,9 @@ export class AuthRepository {
           email: data.email,
           password: data.password,
           userName,
-          ...(data.emailVerifiedAt && { emailVerifiedAt: data.emailVerifiedAt }),
+          ...(data.emailVerifiedAt && {
+            emailVerifiedAt: data.emailVerifiedAt
+          }),
           ...termsAcceptance()
         },
         select: {
