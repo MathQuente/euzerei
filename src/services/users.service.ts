@@ -619,17 +619,30 @@ export class UserService {
 
   private readonly PUBLIC_PROFILE_PREVIEW_PER_STATUS = 8
 
-  async findPublicUserGames(userId: string) {
+  async findPublicUserGames(
+    userId: string,
+    params: {
+      pageIndex?: number
+      filter?: Status | typeof QUEUE_FILTER
+      query?: string
+      platforms?: Platform[]
+      sortBy?: Parameters<UserService['findManyUserGames']>[4]
+      sortOrder?: 'asc' | 'desc'
+    } = {}
+  ) {
+    const { pageIndex = 0, filter, query, platforms, sortBy, sortOrder } = params
+    const isOverview = !filter && !query && !platforms?.length
     return this.findManyUserGames(
       userId,
-      0,
-      undefined,
-      undefined,
-      'completedAt',
-      'desc',
+      pageIndex,
+      filter,
+      query,
+      isOverview ? 'completedAt' : sortBy,
+      isOverview ? 'desc' : sortOrder,
       {
         previewPerStatus: this.PUBLIC_PROFILE_PREVIEW_PER_STATUS,
         includeLibraryIds: false,
+        platforms,
         // Largados só aparecem para o dono: a interface pública já os esconde.
         excludeStatuses: [Status.DROPPED]
       }

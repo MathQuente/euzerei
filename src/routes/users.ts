@@ -179,6 +179,7 @@ export async function userRoutes(app: FastifyInstance) {
     {
       schema: {
         params: UserSchema.UserParamsSchema,
+        querystring: UserSchema.QueryStringSchema,
         response: {
           200: UserSchema.GetAllUserGamesResponseSchema,
           404: ErrorSchemas.NotFound,

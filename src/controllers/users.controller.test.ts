@@ -180,12 +180,42 @@ describe('UserController.getPublicUserGames', () => {
 
     await controller.getPublicUserGames(
       {
-        params: { userId: '3f1c2e0a-9b4d-4c61-8a57-2d0f7a1b9e44' }
+        params: { userId: '3f1c2e0a-9b4d-4c61-8a57-2d0f7a1b9e44' },
+        query: {}
       } as unknown as FastifyRequest,
       fakeReply()
     )
 
     expect(findPublicUserGames).toHaveBeenCalledTimes(1)
     expect(findManyUserGames).not.toHaveBeenCalled()
+  })
+
+  it('passes the paging, filter and search of the full list to the public method', async () => {
+    const findPublicUserGames = vi.fn().mockResolvedValue({
+      games: {},
+      totalPerStatus: [],
+      total: 0
+    })
+    const controller = new UserController({
+      resolveUserRef: vi.fn(async (ref: string) => ref),
+      findPublicUserGames
+    } as unknown as UserService)
+
+    await controller.getPublicUserGames(
+      {
+        params: { userId: '3f1c2e0a-9b4d-4c61-8a57-2d0f7a1b9e44' },
+        query: { filter: 'PLAYED', pageIndex: '2', query: 'zelda' }
+      } as unknown as FastifyRequest,
+      fakeReply()
+    )
+
+    expect(findPublicUserGames).toHaveBeenCalledWith(
+      '3f1c2e0a-9b4d-4c61-8a57-2d0f7a1b9e44',
+      expect.objectContaining({
+        filter: 'PLAYED',
+        pageIndex: 2,
+        query: 'zelda'
+      })
+    )
   })
 })
