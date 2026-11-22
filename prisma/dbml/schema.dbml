@@ -39,6 +39,8 @@ Table users {
   emailVerifiedAt DateTime
   termsAcceptedAt DateTime
   termsVersion String
+  role UserRole [not null, default: 'USER']
+  suspendedAt DateTime
   createdAt DateTime [default: `now()`, not null]
   updatedAt DateTime [default: `now()`, not null]
   userGames user_games [not null]
@@ -47,6 +49,8 @@ Table users {
   Review reviews [not null]
   accounts platform_accounts [not null]
   favoriteGames user_favorite_games [not null]
+  auditLogs audit_logs [not null]
+  settingsEdits app_settings [not null]
   following follows [not null]
   followers follows [not null]
 }
@@ -219,6 +223,27 @@ Table user_favorite_games {
   }
 }
 
+Table audit_logs {
+  id String [pk]
+  actorId String
+  action String [not null]
+  area AuditArea [not null]
+  target String
+  detail String
+  result AuditResult [not null, default: 'OK']
+  ip String
+  createdAt DateTime [default: `now()`, not null]
+  actor users
+}
+
+Table app_settings {
+  key String [pk]
+  value Json [not null]
+  updatedById String
+  updatedAt DateTime [not null]
+  updatedBy users
+}
+
 Enum Platform {
   STEAM
   PLAYSTATION
@@ -286,6 +311,24 @@ Enum Status {
   DROPPED
 }
 
+Enum UserRole {
+  USER
+  ADMIN
+}
+
+Enum AuditArea {
+  USERS
+  IMPORTS
+  CATALOG
+  MODERATION
+  SYSTEM
+}
+
+Enum AuditResult {
+  OK
+  FAILED
+}
+
 Ref: refresh_token.userId > users.id [delete: Cascade]
 
 Ref: ratings.userId > users.id [delete: Cascade]
@@ -313,3 +356,7 @@ Ref: reviews.userId > users.id [delete: Cascade]
 Ref: user_game_stats.userGameId - user_games.id [delete: Cascade]
 
 Ref: user_favorite_games.userId > users.id [delete: Cascade]
+
+Ref: audit_logs.actorId > users.id [delete: Set Null]
+
+Ref: app_settings.updatedById > users.id [delete: Set Null]

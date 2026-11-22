@@ -43,6 +43,11 @@ const adminUsersService = vi.hoisted(() => ({
   summary: vi.fn(),
   detail: vi.fn()
 }))
+const adminUserActions = vi.hoisted(() => ({
+  suspend: vi.fn(),
+  reactivate: vi.fn(),
+  deleteAccount: vi.fn()
+}))
 const adminSettingsService = vi.hoisted(() => ({
   get: vi.fn(),
   update: vi.fn()
@@ -125,6 +130,13 @@ vi.mock('../services/admin-users.service', () => ({
     detail = adminUsersService.detail
   }
 }))
+vi.mock('../services/admin-user-actions.service', () => ({
+  AdminUserActionsService: class {
+    suspend = adminUserActions.suspend
+    reactivate = adminUserActions.reactivate
+    deleteAccount = adminUserActions.deleteAccount
+  }
+}))
 vi.mock('../services/admin-settings.service', () => ({
   AdminSettingsService: class {
     get = adminSettingsService.get
@@ -185,6 +197,11 @@ beforeEach(() => {
     .mockResolvedValue({ total: 0 })
   adminOverviewService.metrics.mockReset().mockResolvedValue({ users: null })
   adminOverviewService.catalog.mockReset().mockResolvedValue({ total: 0 })
+  adminUserActions.suspend.mockReset().mockResolvedValue({ changed: true })
+  adminUserActions.reactivate.mockReset().mockResolvedValue({ changed: true })
+  adminUserActions.deleteAccount
+    .mockReset()
+    .mockResolvedValue({ deleted: true })
   adminSecurityService.releaseBlock
     .mockReset()
     .mockResolvedValue({ released: true })
@@ -1061,7 +1078,7 @@ describe('GET /admin/users', () => {
     '?page=0',
     '?page=10001',
     '?page=abc',
-    '?filter=suspended',
+    '?filter=banned',
     `?q=${'a'.repeat(101)}`
   ])('rejects %s with a 400 and never reaches the service', async query => {
     const app = await buildApp(allowAdmin)
@@ -1577,6 +1594,110 @@ describe('ações de escrita da onda 2 (jobs falhos)', () => {
       method: 'POST',
       url: `/admin/queues/psn/jobs/${JOB_ID}/retry`
     })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.body).not.toContain('secret')
+  })
+})
+
+describe('ações de conta em /admin/users', () => {
+  const calls = [
+    ['POST', `/admin/users/${USER_ID}/suspend`],
+    ['POST', `/admin/users/${USER_ID}/reactivate`],
+    ['DELETE', `/admin/users/${USER_ID}?handle=kenzo`]
+  ] as const
+  const services = () => [
+    adminUserActions.suspend,
+    adminUserActions.reactivate,
+    adminUserActions.deleteAccount
+  ]
+
+  it.each(calls)(
+    '%s %s sem sessão de admin: 401 sem chegar ao serviço',
+    async (method, url) => {
+      const app = await buildApp(denyAll)
+
+      expect((await app.inject({ method, url })).statusCode).toBe(401)
+      for (const service of services()) expect(service).not.toHaveBeenCalled()
+    }
+  )
+
+  it('401 vem antes de 400 mesmo com parâmetros inválidos', async () => {
+    const app = await buildApp(denyAll)
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/admin/users/nao-e-uuid'
+    })
+
+    expect(response.statusCode).toBe(401)
+  })
+
+  it.each([
+    ['POST', '/admin/users/nao-e-uuid/suspend'],
+    ['POST', '/admin/users/nao-e-uuid/reactivate'],
+    ['DELETE', '/admin/users/nao-e-uuid?handle=kenzo'],
+    ['DELETE', `/admin/users/${USER_ID}`],
+    ['DELETE', `/admin/users/${USER_ID}?handle=`],
+    ['DELETE', `/admin/users/${USER_ID}?handle=${'a'.repeat(101)}`]
+  ] as const)(
+    '%s %s inválido: 400 sem chegar ao serviço',
+    async (method, url) => {
+      const app = await buildApp(allowAdmin)
+
+      expect((await app.inject({ method, url })).statusCode).toBe(400)
+      for (const service of services()) expect(service).not.toHaveBeenCalled()
+    }
+  )
+
+  it('suspender, reativar e excluir passam o id, o handle e o admin', async () => {
+    const app = await buildApp(allowAdmin)
+    const actor = { actorId: 'admin-1', ip: expect.any(String) }
+
+    const suspended = await app.inject({ method: 'POST', url: calls[0][1] })
+    const reactivated = await app.inject({ method: 'POST', url: calls[1][1] })
+    const deleted = await app.inject({ method: 'DELETE', url: calls[2][1] })
+
+    expect(suspended.json()).toEqual({ changed: true })
+    expect(reactivated.json()).toEqual({ changed: true })
+    expect(deleted.json()).toEqual({ deleted: true })
+    expect(adminUserActions.suspend).toHaveBeenCalledWith(USER_ID, actor)
+    expect(adminUserActions.reactivate).toHaveBeenCalledWith(USER_ID, actor)
+    expect(adminUserActions.deleteAccount).toHaveBeenCalledWith(
+      USER_ID,
+      'kenzo',
+      actor
+    )
+  })
+
+  it.each([
+    [403, 'Contas de administrador não podem ser alteradas por aqui.'],
+    [404, 'Usuário não encontrado.'],
+    [409, 'O handle digitado não confere com a conta.'],
+    [503, 'Não foi possível encerrar as sessões agora.']
+  ] as const)(
+    'o erro %s do serviço chega ao cliente',
+    async (status, message) => {
+      const app = await buildApp(allowAdmin)
+      adminUserActions.deleteAccount.mockRejectedValue(
+        new ClientError(message, status)
+      )
+
+      const response = await app.inject({ method: 'DELETE', url: calls[2][1] })
+
+      expect(response.statusCode).toBe(status)
+      expect(response.json().message).toBe(message)
+    }
+  )
+
+  it('uma falha inesperada é 500 genérico, sem detalhes internos', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminUserActions.suspend.mockRejectedValue(
+      new Error('ECONNREFUSED postgres://secret')
+    )
+
+    const response = await app.inject({ method: 'POST', url: calls[0][1] })
 
     expect(response.statusCode).toBe(500)
     expect(response.body).not.toContain('secret')

@@ -12,6 +12,8 @@ function filterWhere(filter: AdminUsersFilter): Prisma.UserWhereInput {
   switch (filter) {
     case 'emailPending':
       return { emailVerifiedAt: null }
+    case 'suspended':
+      return { suspendedAt: { not: null } }
     case 'noStore':
       return { accounts: { none: {} } }
     case 'noTerms':

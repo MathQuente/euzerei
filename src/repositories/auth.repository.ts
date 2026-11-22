@@ -73,10 +73,24 @@ export class AuthRepository {
     }
   }
 
+  /**
+   * Trava a linha do usuário e recusa se ele foi suspenso. A suspensão faz
+   * UPDATE (lock exclusivo), então não corre junto com a emissão de sessão.
+   */
+  private async lockActiveUser(tx: Prisma.TransactionClient, userId: string) {
+    const rows = await tx.$queryRaw<
+      { suspended_at: Date | null }[]
+    >`SELECT suspended_at FROM users WHERE id = ${userId} FOR SHARE`
+    if (rows[0]?.suspended_at) {
+      throw new ClientError('Sessão inválida ou expirada.', 401)
+    }
+  }
+
   async saveToken(token: string, userId: string, expiresAt: Date) {
-    await prisma.$transaction(tx =>
-      this.persistToken(tx, token, userId, expiresAt)
-    )
+    await prisma.$transaction(async tx => {
+      await this.lockActiveUser(tx, userId)
+      await this.persistToken(tx, token, userId, expiresAt)
+    })
   }
 
   async rotateToken(
@@ -86,7 +100,7 @@ export class AuthRepository {
     expiresAt: Date
   ) {
     await prisma.$transaction(async tx => {
-      await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId} FOR SHARE`
+      await this.lockActiveUser(tx, userId)
       const { count } = await tx.refreshToken.updateMany({
         where: { tokenHash: hashToken(oldToken), isValid: true },
         data: { isValid: false }
@@ -103,7 +117,13 @@ export class AuthRepository {
   async findUserByGoogleId(googleId: string) {
     return prisma.user.findUnique({
       where: { googleId },
-      select: { id: true, email: true, userName: true, profilePicture: true }
+      select: {
+        id: true,
+        email: true,
+        userName: true,
+        profilePicture: true,
+        suspendedAt: true
+      }
     })
   }
 
@@ -161,6 +181,7 @@ export class AuthRepository {
         googleId: true,
         discordId: true,
         emailVerifiedAt: true,
+        suspendedAt: true,
         ...(includePassword ? { password: true } : {})
       }
     })
@@ -175,7 +196,8 @@ export class AuthRepository {
         userName: true,
         profilePicture: true,
         googleId: true,
-        discordId: true
+        discordId: true,
+        suspendedAt: true
       }
     })
   }
@@ -338,7 +360,8 @@ export class AuthRepository {
     return prisma.refreshToken.findUnique({
       where: {
         tokenHash: hashToken(token)
-      }
+      },
+      include: { user: { select: { suspendedAt: true } } }
     })
   }
 

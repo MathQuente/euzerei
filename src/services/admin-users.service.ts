@@ -26,6 +26,7 @@ function toItem(user: PageUser, lastSeen: Map<string, Date>) {
     email: user.email,
     emailVerified: user.emailVerifiedAt !== null,
     role: user.role.toLowerCase(),
+    suspended: Boolean(user.suspendedAt),
     stores: [
       ...new Set(user.accounts.map(account => account.platform.toLowerCase()))
     ].sort(),
@@ -95,6 +96,8 @@ export class AdminUsersService {
       handle: user.userName,
       email: user.email,
       role: user.role.toLowerCase(),
+      suspended: Boolean(user.suspendedAt),
+      suspendedAt: user.suspendedAt?.toISOString() ?? null,
       createdAt: user.createdAt.toISOString(),
       emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
       lastSeenAt: lastSeen._max.createdAt?.toISOString() ?? null,

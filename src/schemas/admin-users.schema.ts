@@ -6,6 +6,7 @@ export const ADMIN_USERS_MAX_QUERY_LENGTH = 100
 export const ADMIN_USERS_FILTERS = [
   'all',
   'emailPending',
+  'suspended',
   'noStore',
   'noTerms'
 ] as const
@@ -31,4 +32,8 @@ export type AdminUsersListQuery = z.infer<typeof AdminUsersListQuerySchema>
 
 export const AdminUserParamsSchema = z.object({
   id: z.uuid()
+})
+
+export const AdminUserDeleteQuerySchema = z.object({
+  handle: z.string().trim().min(1).max(100)
 })

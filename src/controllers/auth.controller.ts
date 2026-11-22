@@ -1,6 +1,7 @@
 import { FastifyReply, FastifyRequest } from 'fastify'
 import { AuthService } from '../services/auth.service'
 import * as AuthSchema from '../schemas/auth.schema'
+import { AccountSuspendedError } from '../errors/account-suspended-error'
 import { ClientError } from '../errors/client-error'
 import { TermsRequiredError } from '../errors/terms-required-error'
 import { clearAuthCookies, setAuthCookies } from '../utils/auth-cookies'
@@ -16,6 +17,7 @@ export class AuthController {
 
   private oauthErrorCode(error: unknown) {
     if (error instanceof TermsRequiredError) return 'terms_required'
+    if (error instanceof AccountSuspendedError) return 'account_suspended'
     if (error instanceof ClientError && error.statusCode === 403) {
       return 'email_not_verified'
     }
