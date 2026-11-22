@@ -5,6 +5,8 @@
 
 # EuZerei (API)
 
+[![CI](https://github.com/MathQuente/euzerei/actions/workflows/ci.yml/badge.svg)](https://github.com/MathQuente/euzerei/actions/workflows/ci.yml)
+
 API do EuZerei, um rastreador de biblioteca de jogos. Guarda cada jogo no status certo, com horas por plataforma, nota e review, e importa a biblioteca da Steam, da PSN e do Xbox.
 
 **Demo:** https://euzereiapp.vercel.app
@@ -71,6 +73,12 @@ As variáveis básicas para subir a API são `DATABASE_URL`, `REDIS_URL`, `SECRE
 | `npm start` | roda a versão compilada |
 | `npm test` | testes com Vitest |
 | `npm run lint` | lint com ESLint |
+| `npm run typecheck` | checagem de tipos com `tsc --noEmit` |
+| `npm run check` | lint, tipos, formatação e testes |
+
+## CI
+
+O GitHub Actions (`.github/workflows/ci.yml`) roda em todo push e pull request: `npm ci`, `npx prisma generate`, `npm run lint` e `npm test`, com Node 22. Os testes não precisam de PostgreSQL, Redis nem de chaves externas.
 
 ## Deploy
 
