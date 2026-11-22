@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { IMPORTS_MAX_PAGE, ImportListQuerySchema } from './admin-imports.schema'
+import {
+  IMPORTS_MAX_LIMIT,
+  IMPORTS_MAX_PAGE,
+  ImportListQuerySchema
+} from './admin-imports.schema'
 
 const parse = (query: Record<string, string>) =>
   ImportListQuerySchema.safeParse(query)
@@ -52,4 +56,23 @@ describe('ImportListQuerySchema', () => {
   it('accepts the page cap', () => {
     expect(parse({ page: String(IMPORTS_MAX_PAGE) }).success).toBe(true)
   })
+
+  it('has no limit by default, so the list keeps its page size', () => {
+    expect(parse({}).data?.limit).toBeUndefined()
+  })
+
+  it('reads the limit and treats a blank one as absent', () => {
+    expect(parse({ limit: '6' }).data?.limit).toBe(6)
+    expect(parse({ limit: String(IMPORTS_MAX_LIMIT) }).data?.limit).toBe(
+      IMPORTS_MAX_LIMIT
+    )
+    expect(parse({ limit: '' }).data?.limit).toBeUndefined()
+  })
+
+  it.each(['0', '-1', '1.5', 'abc', String(IMPORTS_MAX_LIMIT + 1)])(
+    'refuses limit %s',
+    limit => {
+      expect(parse({ limit }).success).toBe(false)
+    }
+  )
 })
