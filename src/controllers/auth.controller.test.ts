@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { FastifyReply, FastifyRequest } from 'fastify'
+import { AccountSuspendedError } from '../errors/account-suspended-error'
 import { AuthController } from './auth.controller'
 import { AuthService } from '../services/auth.service'
 import { ClientError } from '../errors/client-error'
@@ -247,6 +248,30 @@ describe('AuthController provider callbacks', () => {
       'http://localhost:5173/configuracoes/seguranca?vinculado=google'
     )
   })
+
+  it.each(['google', 'discord'] as const)(
+    '%s: conta suspensa volta ao app com error=account_suspended, não email_not_verified',
+    async provider => {
+      profileFetch({ sub: 'p-1', email: 'a@a.com', email_verified: true })
+      vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      const login = vi.fn().mockRejectedValue(new AccountSuspendedError())
+      const controller = new AuthController({
+        loginWithGoogle: login,
+        loginWithDiscord: login
+      } as unknown as AuthService)
+      const r = reply()
+      const callback =
+        provider === 'google'
+          ? controller.googleCallback.bind(controller)
+          : controller.discordCallback.bind(controller)
+
+      await callback(request(null), r, { acceptedTerms: true })
+
+      expect(r.redirect).toHaveBeenCalledWith(
+        'http://localhost:5173/auth?error=account_suspended'
+      )
+    }
+  )
 
   it('does not link when the browser is signed in as someone else, or not at all', async () => {
     profileFetch({ sub: 'g-1', email: 'a@a.com', email_verified: true })

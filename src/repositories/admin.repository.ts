@@ -9,6 +9,7 @@ export class AdminRepository {
         userName: true,
         email: true,
         role: true,
+        suspendedAt: true,
         password: true
       }
     })

@@ -226,6 +226,19 @@ describe('app.authenticateAdmin', () => {
     expect([before.statusCode, after.statusCode]).toEqual([200, 403])
   })
 
+  it('answers 401 for a suspended account, even with the 15 min revocation mark long gone', async () => {
+    adminRepository.findById.mockResolvedValue(
+      adminRow({ suspendedAt: new Date() })
+    )
+
+    const response = await app.inject({
+      url: '/admin-only',
+      headers: bearer(panelToken())
+    })
+
+    expect(response.statusCode).toBe(401)
+  })
+
   it('answers 401 when the account was deleted', async () => {
     adminRepository.findById.mockResolvedValue(null)
 

@@ -2,6 +2,7 @@ import { JWT } from '@fastify/jwt'
 import { AuthRepository } from '../repositories/auth.repository'
 import { CacheRepository } from '../repositories/cache.repository'
 import { EmailService } from './email.service'
+import { AccountSuspendedError } from '../errors/account-suspended-error'
 import { ClientError } from '../errors/client-error'
 import { ReauthRequiredError } from '../errors/reauth-required-error'
 import { ProviderLinkError } from '../errors/provider-link-error'
@@ -86,6 +87,9 @@ const PROVIDER_LABEL: Record<OAuthProvider, 'Google' | 'Discord'> = {
 const EMAIL_TAKEN_MESSAGE = 'Este e-mail já está em uso.'
 const INVALID_EMAIL_CHANGE_LINK_MESSAGE =
   'Link de confirmação inválido ou expirado.'
+const assertNotSuspended = (user: { suspendedAt?: Date | null } | null) => {
+  if (user?.suspendedAt) throw new AccountSuspendedError()
+}
 const hasReached = (failures: unknown, limit: number) =>
   typeof failures === 'number' && failures >= limit
 
@@ -149,7 +153,8 @@ export class AuthService {
     if (
       !storedToken ||
       !storedToken.isValid ||
-      storedToken.expiresAt < new Date()
+      storedToken.expiresAt < new Date() ||
+      storedToken.user?.suspendedAt
     ) {
       throw new ClientError('Sessão inválida ou expirada.', 401)
     }
@@ -184,7 +189,8 @@ export class AuthService {
     if (
       !storedToken ||
       !storedToken.isValid ||
-      storedToken.expiresAt < new Date()
+      storedToken.expiresAt < new Date() ||
+      storedToken.user?.suspendedAt
     ) {
       return null
     }
@@ -431,6 +437,7 @@ export class AuthService {
     acceptedTerms: boolean
   ) {
     let user = await this.authRepository.findUserByGoogleId(profile.sub)
+    assertNotSuspended(user)
 
     if (!user) {
       if (!profile.email || profile.email_verified !== true) {
@@ -445,6 +452,7 @@ export class AuthService {
         if (existing.googleId) {
           throw new ClientError(PROVIDER_ALREADY_LINKED_MESSAGE, 409)
         }
+        assertNotSuspended(existing)
 
         const discardedPasswordHash =
           existing.discordId || existing.emailVerifiedAt
@@ -482,7 +490,8 @@ export class AuthService {
           id: created.id,
           email,
           userName: created.userName ?? profile.name,
-          profilePicture: profile.picture
+          profilePicture: profile.picture,
+          suspendedAt: null
         }
       }
     }
@@ -506,6 +515,7 @@ export class AuthService {
     acceptedTerms: boolean
   ) {
     let user = await this.authRepository.findByDiscordId(discordUser.id)
+    assertNotSuspended(user)
 
     const profilePicture = discordUser.avatar
       ? `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`
@@ -524,6 +534,7 @@ export class AuthService {
         if (existing.discordId) {
           throw new ClientError(PROVIDER_ALREADY_LINKED_MESSAGE, 409)
         }
+        assertNotSuspended(existing)
 
         const existingId = existing.id
         const discardedPasswordHash =
@@ -613,6 +624,8 @@ export class AuthService {
       }
       throw new ClientError('Email ou senha incorretos.')
     }
+
+    assertNotSuspended(user)
 
     await this.cacheRepository.del(ipFailuresKey)
     await this.cacheRepository.set(familiarKey, true, FAMILIAR_IP_TTL_SECONDS)

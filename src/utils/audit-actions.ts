@@ -1,4 +1,6 @@
 export const SUSPEND_ACCOUNT_ACTION = 'Suspendeu a conta'
+export const REACTIVATE_ACCOUNT_ACTION = 'Reativou a conta'
+export const DELETE_ACCOUNT_ACTION = 'Excluiu a conta'
 
 export const RELEASE_BLOCK_ACTION = 'Liberou um bloqueio de login'
 export const END_SESSION_ACTION = 'Encerrou uma sessão'

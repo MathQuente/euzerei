@@ -9,7 +9,7 @@ import { QUEUE_FILTER, UserRepository } from '../repositories/users.repository'
 import { FollowRepository } from '../repositories/follow.repository'
 import { FavoriteGameRow, PaginatedUserGameRow } from '../types/user'
 import { IGDBService } from './igdb.service'
-import { CloudinaryService } from './cloudinary.service'
+import { destroyOwnedImages } from '../utils/owned-images'
 import { GameCacheService } from './game-cache.service'
 import { UserGamePlatformRepository } from '../repositories/user-game-platform.repository'
 import { CacheRepository } from '../repositories/cache.repository'
@@ -142,32 +142,12 @@ export class UserService {
     return { user }
   }
 
-  private async destroyOwnedImages(urls: (string | null | undefined)[]) {
-    if (!CloudinaryService.isConfigured()) return
-
-    try {
-      const candidates = [
-        ...new Set(urls.filter((url): url is string => !!url))
-      ].filter(url => CloudinaryService.publicIdFromUrl(url) !== null)
-      if (candidates.length === 0) return
-
-      const inUse = new Set(
-        await this.userRepository.findImageUrlsInUse(candidates)
-      )
-
-      for (const url of candidates) {
-        if (inUse.has(url)) continue
-        try {
-          await CloudinaryService.destroy(
-            CloudinaryService.publicIdFromUrl(url)!
-          )
-        } catch (error) {
-          this.logImageRemovalFailure(error)
-        }
-      }
-    } catch (error) {
-      this.logImageRemovalFailure(error)
-    }
+  private destroyOwnedImages(urls: (string | null | undefined)[]) {
+    return destroyOwnedImages(
+      urls,
+      candidates => this.userRepository.findImageUrlsInUse(candidates),
+      error => this.logImageRemovalFailure(error)
+    )
   }
 
   private logImageRemovalFailure(error: unknown) {

@@ -168,6 +168,18 @@ export class ImportQueueRepository {
     await job.remove()
   }
 
+  /** Remove os jobs de importação do usuário que não estão rodando. O id é fixo por usuário e loja. */
+  async removeUserJobs(userId: string): Promise<number> {
+    let removed = 0
+    for (const store of IMPORT_STORES) {
+      const job = await this.queues[store].getJob(`${store}-import-${userId}`)
+      if (!job || (await job.getState()) === 'active') continue
+      await job.remove()
+      removed += 1
+    }
+    return removed
+  }
+
   async setPaused(store: ImportStore, paused: boolean): Promise<void> {
     if (paused) await this.queues[store].pause()
     else await this.queues[store].resume()

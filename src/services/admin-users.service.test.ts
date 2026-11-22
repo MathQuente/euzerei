@@ -119,6 +119,7 @@ describe('AdminUsersService.list', () => {
           email: 'kenzo@exemplo.com',
           emailVerified: true,
           role: 'user',
+          suspended: false,
           stores: ['steam', 'xbox'],
           games: 134,
           lastSeenAt: '2026-11-20T13:00:00.000Z',

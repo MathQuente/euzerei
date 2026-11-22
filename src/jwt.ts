@@ -241,7 +241,11 @@ export class Jwt {
           )
         }
 
-        if (!admin || payload.pv !== passwordFingerprint(admin.password)) {
+        if (
+          !admin ||
+          admin.suspendedAt ||
+          payload.pv !== passwordFingerprint(admin.password)
+        ) {
           return respondUnauthorized(response)
         }
         if (admin.role !== 'ADMIN') {
