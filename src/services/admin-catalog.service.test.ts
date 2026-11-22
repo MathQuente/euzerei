@@ -238,7 +238,8 @@ describe('AdminCatalogService.jobs', () => {
       'Rodou o backfill de modos de jogo',
       'Rodou o backfill da precisão da data de lançamento',
       'Rodou o backfill de slugs',
-      'Rodou o backfill de hypes e notas'
+      'Rodou o backfill de hypes e notas',
+      'Rodou o sync dos populares'
     ])
     expect(jobs[0]).toMatchObject({
       lastRunAt: run.toISOString(),

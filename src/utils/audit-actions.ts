@@ -9,6 +9,10 @@ export const DISCARD_JOB_ACTION = 'Descartou um job de importação'
 export const PAUSE_QUEUE_ACTION = 'Pausou a fila de importação'
 export const RESUME_QUEUE_ACTION = 'Retomou a fila de importação'
 
+export const SYNC_POPULAR_ACTION = 'Rodou o sync dos populares'
+export const RESEND_VERIFICATION_ACTION = 'Reenviou a verificação de e-mail'
+export const PASSWORD_RESET_ACTION = 'Enviou a redefinição de senha'
+
 export const BACKFILL_ACTIONS = [
   'Rodou o backfill de capas',
   'Rodou o backfill de tempo de jogo',

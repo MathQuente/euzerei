@@ -3,6 +3,10 @@ import { ZodTypeProvider } from 'fastify-type-provider-zod'
 import { AdminUsersController } from '../controllers/admin-users.controller'
 import { importQueues, importQueuesRedis } from '../queues/import-queues'
 import { ImportQueueRepository } from '../repositories/import-queue.repository'
+import { AuthRepository } from '../repositories/auth.repository'
+import { CacheRepository } from '../repositories/cache.repository'
+import { AuthService } from '../services/auth.service'
+import { AdminUserEmailsService } from '../services/admin-user-emails.service'
 import { AdminUserActionsService } from '../services/admin-user-actions.service'
 import { AdminUsersService } from '../services/admin-users.service'
 
@@ -14,6 +18,9 @@ export async function adminUsersRoutes(app: FastifyInstance) {
       undefined,
       undefined,
       new ImportQueueRepository(importQueues, importQueuesRedis)
+    ),
+    new AdminUserEmailsService(
+      new AuthService(new AuthRepository(), app.jwt, new CacheRepository())
     )
   )
   const typed = app.withTypeProvider<ZodTypeProvider>()
@@ -28,6 +35,12 @@ export async function adminUsersRoutes(app: FastifyInstance) {
   )
   typed.post('/:id/reactivate', async (request, reply) =>
     controller.reactivate(request, reply)
+  )
+  typed.post('/:id/resend-verification', async (request, reply) =>
+    controller.resendVerification(request, reply)
+  )
+  typed.post('/:id/password-reset', async (request, reply) =>
+    controller.resetPassword(request, reply)
   )
   typed.delete('/:id', async (request, reply) =>
     controller.deleteAccount(request, reply)

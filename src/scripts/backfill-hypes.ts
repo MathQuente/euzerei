@@ -7,6 +7,15 @@ import { BATCH_SIZE, DELAY_MS, sleep } from './utils'
 async function main() {
   const repo = new GameCacheRepository()
 
+  if (process.argv.includes('--dry-run')) {
+    const missing = await repo.countMissingHypes()
+    console.log(
+      `[dry run] ${missing} jogos do cache sem hypes. Nada foi consultado no IGDB nem gravado.`
+    )
+    await prisma.$disconnect()
+    return
+  }
+
   let totalUpdated = 0
   let batch = 0
 

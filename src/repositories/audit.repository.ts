@@ -34,6 +34,11 @@ export class AuditRepository {
     })
   }
 
+  /** A ação que a linha registrava terminou bem: o detalhe passa a dizer o que ela fez. */
+  markFinished(id: string, detail: string) {
+    return prisma.auditLog.update({ where: { id }, data: { detail } })
+  }
+
   findPage(where: Prisma.AuditLogWhereInput, skip: number, take: number) {
     return prisma.$transaction([
       prisma.auditLog.count({ where }),

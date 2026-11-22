@@ -48,6 +48,15 @@ const adminUserActions = vi.hoisted(() => ({
   reactivate: vi.fn(),
   deleteAccount: vi.fn()
 }))
+const adminCatalogRun = vi.hoisted(() => ({
+  start: vi.fn(),
+  current: vi.fn(),
+  cancel: vi.fn()
+}))
+const adminUserEmails = vi.hoisted(() => ({
+  resendVerification: vi.fn(),
+  resetPassword: vi.fn()
+}))
 const adminSettingsService = vi.hoisted(() => ({
   get: vi.fn(),
   update: vi.fn()
@@ -137,6 +146,24 @@ vi.mock('../services/admin-user-actions.service', () => ({
     deleteAccount = adminUserActions.deleteAccount
   }
 }))
+vi.mock('../services/admin-catalog-run.service', () => ({
+  AdminCatalogRunService: class {
+    start = adminCatalogRun.start
+    current = adminCatalogRun.current
+    cancel = adminCatalogRun.cancel
+  }
+}))
+vi.mock('../services/admin-user-emails.service', () => ({
+  AdminUserEmailsService: class {
+    resendVerification = adminUserEmails.resendVerification
+    resetPassword = adminUserEmails.resetPassword
+  }
+}))
+vi.mock('../services/auth.service', () => ({ AuthService: class {} }))
+vi.mock('../repositories/auth.repository', () => ({ AuthRepository: class {} }))
+vi.mock('../repositories/cache.repository', () => ({
+  CacheRepository: class {}
+}))
 vi.mock('../services/admin-settings.service', () => ({
   AdminSettingsService: class {
     get = adminSettingsService.get
@@ -197,6 +224,17 @@ beforeEach(() => {
     .mockResolvedValue({ total: 0 })
   adminOverviewService.metrics.mockReset().mockResolvedValue({ users: null })
   adminOverviewService.catalog.mockReset().mockResolvedValue({ total: 0 })
+  adminCatalogRun.start
+    .mockReset()
+    .mockResolvedValue({ run: { status: 'running' }, lines: [] })
+  adminCatalogRun.current
+    .mockReset()
+    .mockResolvedValue({ run: null, lines: [] })
+  adminCatalogRun.cancel.mockReset().mockResolvedValue({ cancelling: true })
+  adminUserEmails.resendVerification
+    .mockReset()
+    .mockResolvedValue({ sent: true })
+  adminUserEmails.resetPassword.mockReset().mockResolvedValue({ sent: true })
   adminUserActions.suspend.mockReset().mockResolvedValue({ changed: true })
   adminUserActions.reactivate.mockReset().mockResolvedValue({ changed: true })
   adminUserActions.deleteAccount
@@ -1701,5 +1739,203 @@ describe('ações de conta em /admin/users', () => {
 
     expect(response.statusCode).toBe(500)
     expect(response.body).not.toContain('secret')
+  })
+})
+
+describe('rodar jobs do catálogo em /admin/catalog', () => {
+  const run = (mode?: string) => ({
+    method: 'POST' as const,
+    url: '/admin/catalog/jobs/slugs/run',
+    payload: mode ? { mode } : {}
+  })
+  const all = () => [
+    adminCatalogRun.start,
+    adminCatalogRun.current,
+    adminCatalogRun.cancel
+  ]
+
+  it.each([
+    ['POST', '/admin/catalog/jobs/slugs/run'],
+    ['GET', '/admin/catalog/runs/current'],
+    ['POST', '/admin/catalog/runs/current/cancel']
+  ] as const)(
+    '%s %s sem sessão de admin: 401 sem chegar ao serviço',
+    async (method, url) => {
+      const app = await buildApp(denyAll)
+
+      expect((await app.inject({ method, url })).statusCode).toBe(401)
+      for (const service of all()) expect(service).not.toHaveBeenCalled()
+    }
+  )
+
+  it('401 vem antes de 400', async () => {
+    const app = await buildApp(denyAll)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/admin/catalog/jobs/NAO%20E%20CHAVE/run'
+    })
+
+    expect(response.statusCode).toBe(401)
+  })
+
+  it.each([
+    [{ method: 'POST' as const, url: '/admin/catalog/jobs/slugs/run' }],
+    [
+      {
+        method: 'POST' as const,
+        url: '/admin/catalog/jobs/slugs/run',
+        payload: { mode: 'tudo' }
+      }
+    ],
+    [
+      {
+        method: 'POST' as const,
+        url: '/admin/catalog/jobs/SLUGS;rm/run',
+        payload: { mode: 'dry' }
+      }
+    ]
+  ])('pedido inválido: 400 sem chegar ao serviço', async request => {
+    const app = await buildApp(allowAdmin)
+
+    expect((await app.inject(request)).statusCode).toBe(400)
+    expect(adminCatalogRun.start).not.toHaveBeenCalled()
+  })
+
+  it('rodar responde 202 e passa a chave, o modo e o admin', async () => {
+    const app = await buildApp(allowAdmin)
+
+    const response = await app.inject(run('apply'))
+
+    expect(response.statusCode).toBe(202)
+    expect(adminCatalogRun.start).toHaveBeenCalledWith('slugs', 'apply', {
+      actorId: 'admin-1',
+      ip: expect.any(String)
+    })
+  })
+
+  it('lê a execução atual e cancela', async () => {
+    const app = await buildApp(allowAdmin)
+
+    const current = await app.inject({
+      method: 'GET',
+      url: '/admin/catalog/runs/current'
+    })
+    const cancel = await app.inject({
+      method: 'POST',
+      url: '/admin/catalog/runs/current/cancel'
+    })
+
+    expect(current.json()).toEqual({ run: null, lines: [] })
+    expect(cancel.json()).toEqual({ cancelling: true })
+  })
+
+  it.each([
+    [404, 'Job desconhecido.'],
+    [
+      409,
+      'Já há uma execução em andamento (Capas). Espere ela terminar ou cancele.'
+    ]
+  ] as const)(
+    'o erro %s do serviço chega ao cliente',
+    async (status, message) => {
+      const app = await buildApp(allowAdmin)
+      adminCatalogRun.start.mockRejectedValue(new ClientError(message, status))
+
+      const response = await app.inject(run('apply'))
+
+      expect(response.statusCode).toBe(status)
+      expect(response.json().message).toBe(message)
+    }
+  )
+
+  it('falha inesperada é 500 genérico, sem detalhes internos', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminCatalogRun.start.mockRejectedValue(
+      new Error('ECONNREFUSED redis://secret')
+    )
+
+    const response = await app.inject(run('apply'))
+
+    expect(response.statusCode).toBe(500)
+    expect(response.body).not.toContain('secret')
+  })
+})
+
+describe('e-mails em /admin/users', () => {
+  const calls = [
+    ['POST', `/admin/users/${USER_ID}/resend-verification`],
+    ['POST', `/admin/users/${USER_ID}/password-reset`]
+  ] as const
+
+  it.each(calls)(
+    '%s %s sem sessão de admin: 401 sem chegar ao serviço',
+    async (method, url) => {
+      const app = await buildApp(denyAll)
+
+      expect((await app.inject({ method, url })).statusCode).toBe(401)
+      expect(adminUserEmails.resendVerification).not.toHaveBeenCalled()
+      expect(adminUserEmails.resetPassword).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    ['/admin/users/abc/resend-verification'],
+    ['/admin/users/abc/password-reset']
+  ])('%s com id inválido: 400', async url => {
+    const app = await buildApp(allowAdmin)
+
+    expect((await app.inject({ method: 'POST', url })).statusCode).toBe(400)
+    expect(adminUserEmails.resendVerification).not.toHaveBeenCalled()
+    expect(adminUserEmails.resetPassword).not.toHaveBeenCalled()
+  })
+
+  it('passa o id e o admin', async () => {
+    const app = await buildApp(allowAdmin)
+    const actor = { actorId: 'admin-1', ip: expect.any(String) }
+
+    const a = await app.inject({ method: 'POST', url: calls[0][1] })
+    const b = await app.inject({ method: 'POST', url: calls[1][1] })
+
+    expect(a.json()).toEqual({ sent: true })
+    expect(b.json()).toEqual({ sent: true })
+    expect(adminUserEmails.resendVerification).toHaveBeenCalledWith(
+      USER_ID,
+      actor
+    )
+    expect(adminUserEmails.resetPassword).toHaveBeenCalledWith(USER_ID, actor)
+  })
+
+  it.each([
+    [409, 'O e-mail desta conta já está verificado.'],
+    [429, 'Já foi enviado agora há pouco. Espere um minuto para repetir.'],
+    [503, 'Não foi possível enviar o email agora.']
+  ] as const)(
+    'o erro %s do serviço chega ao cliente',
+    async (status, message) => {
+      const app = await buildApp(allowAdmin)
+      adminUserEmails.resendVerification.mockRejectedValue(
+        new ClientError(message, status)
+      )
+
+      const response = await app.inject({ method: 'POST', url: calls[0][1] })
+
+      expect(response.statusCode).toBe(status)
+      expect(response.json().message).toBe(message)
+    }
+  )
+
+  it('falha inesperada é 500 genérico', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminUserEmails.resetPassword.mockRejectedValue(
+      new Error('smtp://user:pass@host')
+    )
+
+    const response = await app.inject({ method: 'POST', url: calls[1][1] })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.body).not.toContain('pass')
   })
 })

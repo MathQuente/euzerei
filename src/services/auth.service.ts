@@ -390,6 +390,25 @@ export class AuthService {
     if (!user) throw new ClientError('Usuário não encontrado.', 404)
     if (user.emailVerifiedAt) return
 
+    await this.sendVerificationRequest(user)
+  }
+
+  /**
+   * Pedido do admin: diferente do pedido do próprio usuário, diz o que aconteceu em vez de voltar em silêncio.
+   * O limite por hora é o mesmo do usuário (um admin repetindo não contorna o limite de envios).
+   */
+  async resendEmailVerificationAsAdmin(userId: string) {
+    const user = await this.authRepository.findById(userId)
+    if (!user) throw new ClientError('Usuário não encontrado.', 404)
+    if (user.emailVerifiedAt) {
+      throw new ClientError('O e-mail desta conta já está verificado.', 409)
+    }
+
+    await this.sendVerificationRequest(user)
+  }
+
+  private async sendVerificationRequest(user: { id: string; email: string }) {
+    const userId = user.id
     const requests = await this.cacheRepository.increment(
       emailVerificationRequestsKey(userId),
       VERIFICATION_REQUESTS_WINDOW_SECONDS
@@ -636,6 +655,44 @@ export class AuthService {
         id: user.id,
         userName: user.userName
       }
+    }
+  }
+
+  /**
+   * Pedido do admin: o link vai para o e-mail da conta (o admin nunca vê o token), o envio é aguardado e o resultado
+   * volta como erro explícito (429 limite, 503 falha do SMTP) em vez de ser engolido como no pedido público.
+   */
+  async requestPasswordResetAsAdmin(userId: string) {
+    const user = await this.authRepository.findProviderState(userId)
+    if (!user) throw new ClientError('Usuário não encontrado.', 404)
+
+    const requests = await this.cacheRepository.increment(
+      passwordResetRequestsKey(user.email),
+      RESET_REQUESTS_WINDOW_SECONDS
+    )
+    if (requests > MAX_RESET_REQUESTS_PER_HOUR) {
+      throw new ClientError(
+        'Muitos pedidos de redefinição para esta conta. Tente novamente mais tarde.',
+        429
+      )
+    }
+
+    const token = randomToken()
+    await this.cacheRepository.set(
+      passwordResetKey(token),
+      { userId: user.id, at: Date.now() },
+      PASSWORD_RESET_TTL_SECONDS
+    )
+
+    try {
+      await this.emailService.sendPasswordResetEmail(
+        user.email,
+        `${process.env.FRONTEND_URL}/reset-password?token=${token}`
+      )
+    } catch (error) {
+      await this.cacheRepository.del(passwordResetKey(token))
+      logError('[PasswordReset] admin request: email delivery failed', error)
+      throw new ClientError('Não foi possível enviar o email agora.', 503)
     }
   }
 

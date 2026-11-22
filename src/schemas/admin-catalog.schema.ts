@@ -29,5 +29,13 @@ export const CatalogTopAddedQuerySchema = z.object({
   )
 })
 
+export const CatalogJobParamsSchema = z.object({
+  key: z.string().regex(/^[a-z]{1,20}$/)
+})
+
+export const CatalogRunBodySchema = z.object({
+  mode: z.enum(['dry', 'apply'])
+})
+
 export type CatalogSearchQuery = z.infer<typeof CatalogSearchQuerySchema>
 export type CatalogTopAddedQuery = z.infer<typeof CatalogTopAddedQuerySchema>
