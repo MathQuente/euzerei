@@ -27,15 +27,22 @@ function setup(overrides: Partial<OverviewStore> = {}) {
       { date: '2026-11-21', count: 14 },
       { date: '2026-11-01', count: 3 }
     ]),
-    catalogCounts: vi.fn(async () => ({
+    ...overrides
+  }
+  const catalogSource = {
+    overviewCatalog: vi.fn(async (at: Date) => ({
+      generatedAt: at.toISOString(),
       total: 299_505,
       noCover: 5,
       modesUnchecked: 0,
       noSlug: 0
-    })),
-    ...overrides
+    }))
   }
-  return { service: new AdminOverviewService(store), store }
+  return {
+    service: new AdminOverviewService(store, catalogSource),
+    store,
+    catalogSource
+  }
 }
 
 describe('lastDays', () => {
@@ -183,10 +190,8 @@ describe('AdminOverviewService.metrics', () => {
 })
 
 describe('AdminOverviewService.catalog', () => {
-  afterEach(() => vi.useRealTimers())
-
-  it('answers the counts', async () => {
-    const { service } = setup()
+  it('reads the same counts the catalog screen reads, in the same shape', async () => {
+    const { service, catalogSource } = setup()
 
     expect(await service.catalog(now)).toEqual({
       generatedAt: now.toISOString(),
@@ -195,27 +200,6 @@ describe('AdminOverviewService.catalog', () => {
       modesUnchecked: 0,
       noSlug: 0
     })
-  })
-
-  it('caches inside the window', async () => {
-    const { service, store } = setup()
-    await service.catalog(now)
-    await service.catalog(now)
-
-    expect(store.catalogCounts).toHaveBeenCalledTimes(1)
-  })
-
-  it('a failure is not cached: the next call tries again', async () => {
-    let calls = 0
-    const { service } = setup({
-      catalogCounts: vi.fn(async () => {
-        calls += 1
-        if (calls === 1) throw new Error('boom')
-        return { total: 1, noCover: 0, modesUnchecked: 0, noSlug: 0 }
-      })
-    })
-
-    await expect(service.catalog(now)).rejects.toThrow('boom')
-    await expect(service.catalog(now)).resolves.toMatchObject({ total: 1 })
+    expect(catalogSource.overviewCatalog).toHaveBeenCalledWith(now)
   })
 })

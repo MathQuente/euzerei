@@ -3,10 +3,14 @@ import { ZodTypeProvider } from 'fastify-type-provider-zod'
 import { AdminOverviewController } from '../controllers/admin-overview.controller'
 import { AdminOverviewRepository } from '../repositories/admin-overview.repository'
 import { AdminOverviewService } from '../services/admin-overview.service'
+import { getAdminCatalogService } from './admin-catalog'
 
 export async function adminOverviewRoutes(app: FastifyInstance) {
   const controller = new AdminOverviewController(
-    new AdminOverviewService(new AdminOverviewRepository())
+    new AdminOverviewService(
+      new AdminOverviewRepository(),
+      getAdminCatalogService()
+    )
   )
   const typed = app.withTypeProvider<ZodTypeProvider>()
 

@@ -19,6 +19,14 @@ const adminOverviewService = vi.hoisted(() => ({
   metrics: vi.fn(),
   catalog: vi.fn()
 }))
+const adminCatalogService = vi.hoisted(() => ({
+  summary: vi.fn(),
+  jobs: vi.fn(),
+  search: vi.fn(),
+  game: vi.fn(),
+  topAdded: vi.fn(),
+  overviewCatalog: vi.fn()
+}))
 const adminSecurityService = vi.hoisted(() => ({
   summary: vi.fn(),
   blocks: vi.fn(),
@@ -63,6 +71,19 @@ vi.mock('../services/admin-health.service', () => ({
   AdminHealthService: class {
     health = adminHealthService.health
   }
+}))
+vi.mock('../services/admin-catalog.service', () => ({
+  AdminCatalogService: class {
+    summary = adminCatalogService.summary
+    jobs = adminCatalogService.jobs
+    search = adminCatalogService.search
+    game = adminCatalogService.game
+    topAdded = adminCatalogService.topAdded
+    overviewCatalog = adminCatalogService.overviewCatalog
+  }
+}))
+vi.mock('../repositories/admin-catalog.repository', () => ({
+  AdminCatalogRepository: class {}
 }))
 vi.mock('../services/admin-overview.service', () => ({
   AdminOverviewService: class {
@@ -144,6 +165,14 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ total: 0, items: [], unavailable: [] })
   adminHealthService.health.mockReset().mockResolvedValue({ api: {} })
+  adminCatalogService.summary.mockReset().mockResolvedValue({ total: 0 })
+  adminCatalogService.jobs.mockReset().mockResolvedValue({ jobs: [] })
+  adminCatalogService.search.mockReset().mockResolvedValue({ items: [] })
+  adminCatalogService.game.mockReset().mockResolvedValue({ igdbId: 1 })
+  adminCatalogService.topAdded.mockReset().mockResolvedValue({ items: [] })
+  adminCatalogService.overviewCatalog
+    .mockReset()
+    .mockResolvedValue({ total: 0 })
   adminOverviewService.metrics.mockReset().mockResolvedValue({ users: null })
   adminOverviewService.catalog.mockReset().mockResolvedValue({ total: 0 })
   adminSecurityService.summary.mockReset().mockResolvedValue({ blocks: null })
@@ -664,6 +693,181 @@ describe('GET /admin/overview/*', () => {
     const response = await app.inject({
       method: 'GET',
       url: '/admin/overview/catalog'
+    })
+
+    expect(response.statusCode).toBe(503)
+  })
+})
+
+const CATALOG_PATHS = [
+  '/admin/catalog/summary',
+  '/admin/catalog/jobs',
+  '/admin/catalog/games?q=hades',
+  '/admin/catalog/games/7346',
+  '/admin/catalog/top-added'
+]
+
+const catalogServices = () => [
+  adminCatalogService.summary,
+  adminCatalogService.jobs,
+  adminCatalogService.search,
+  adminCatalogService.game,
+  adminCatalogService.topAdded
+]
+
+describe('the catalog reads are behind the admin guard', () => {
+  it.each(CATALOG_PATHS)(
+    '%s answers 401 and never reaches the service',
+    async url => {
+      const app = await buildApp(denyAll)
+
+      const response = await app.inject({ method: 'GET', url })
+
+      expect(response.statusCode).toBe(401)
+      for (const service of catalogServices())
+        expect(service).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    '/admin/catalog/games',
+    '/admin/catalog/games/abc',
+    '/admin/catalog/top-added?days=0'
+  ])('%s is a 401, not a 400, for a stranger', async url => {
+    const app = await buildApp(denyAll)
+
+    const response = await app.inject({ method: 'GET', url })
+
+    expect(response.statusCode).toBe(401)
+  })
+})
+
+describe('GET /admin/catalog/*', () => {
+  it.each([
+    ['/admin/catalog/summary', () => adminCatalogService.summary],
+    ['/admin/catalog/jobs', () => adminCatalogService.jobs]
+  ] as const)('%s answers the service result', async (url, service) => {
+    const app = await buildApp(allowAdmin)
+    service().mockResolvedValue({ marker: url })
+
+    const response = await app.inject({ method: 'GET', url })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ marker: url })
+  })
+
+  it('search trims q and passes it to the service', async () => {
+    const app = await buildApp(allowAdmin)
+
+    await app.inject({
+      method: 'GET',
+      url: '/admin/catalog/games?q=%20hades%20'
+    })
+
+    expect(adminCatalogService.search).toHaveBeenCalledWith('hades')
+  })
+
+  it.each([
+    '/admin/catalog/games',
+    '/admin/catalog/games?q=',
+    '/admin/catalog/games?q=%20%20',
+    `/admin/catalog/games?q=${'a'.repeat(101)}`
+  ])('%s is a 400', async url => {
+    const app = await buildApp(allowAdmin)
+
+    const response = await app.inject({ method: 'GET', url })
+
+    expect(response.statusCode).toBe(400)
+    expect(adminCatalogService.search).not.toHaveBeenCalled()
+  })
+
+  it('the game detail passes the numeric id', async () => {
+    const app = await buildApp(allowAdmin)
+
+    await app.inject({ method: 'GET', url: '/admin/catalog/games/7346' })
+
+    expect(adminCatalogService.game).toHaveBeenCalledWith(7346)
+  })
+
+  it.each(['abc', '0', '-5', '1.5', '2147483648'])(
+    'a bad id (%s) is a 400',
+    async id => {
+      const app = await buildApp(allowAdmin)
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `/admin/catalog/games/${id}`
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(adminCatalogService.game).not.toHaveBeenCalled()
+    }
+  )
+
+  it('an unknown game is the 404 the service raised', async () => {
+    const app = await buildApp(allowAdmin)
+    adminCatalogService.game.mockRejectedValue(
+      new ClientError('Jogo não encontrado.', 404)
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/catalog/games/1'
+    })
+
+    expect(response.statusCode).toBe(404)
+  })
+
+  it('top-added defaults to 7 days and reads days', async () => {
+    const app = await buildApp(allowAdmin)
+
+    await app.inject({ method: 'GET', url: '/admin/catalog/top-added' })
+    await app.inject({ method: 'GET', url: '/admin/catalog/top-added?days=30' })
+
+    expect(adminCatalogService.topAdded).toHaveBeenNthCalledWith(1, 7)
+    expect(adminCatalogService.topAdded).toHaveBeenNthCalledWith(2, 30)
+  })
+
+  it.each(['0', '31', 'abc'])('top-added days=%s is a 400', async days => {
+    const app = await buildApp(allowAdmin)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/admin/catalog/top-added?days=${days}`
+    })
+
+    expect(response.statusCode).toBe(400)
+  })
+
+  it.each([
+    ['/admin/catalog/summary', () => adminCatalogService.summary],
+    ['/admin/catalog/jobs', () => adminCatalogService.jobs],
+    ['/admin/catalog/games?q=x', () => adminCatalogService.search],
+    ['/admin/catalog/games/1', () => adminCatalogService.game],
+    ['/admin/catalog/top-added', () => adminCatalogService.topAdded]
+  ] as const)(
+    '%s: a failure is a 500 with the generic message, no internals',
+    async (url, service) => {
+      const app = await buildApp(allowAdmin)
+      vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      service().mockRejectedValue(new Error('relation "games_cache" missing'))
+
+      const response = await app.inject({ method: 'GET', url })
+
+      expect(response.statusCode).toBe(500)
+      expect(response.json().message).toBe('Internal server error')
+    }
+  )
+
+  it('an unavailable read is a 503 with the message', async () => {
+    const app = await buildApp(allowAdmin)
+    adminCatalogService.summary.mockRejectedValue(
+      new ClientError('Não foi possível ler o catálogo agora.', 503)
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/catalog/summary'
     })
 
     expect(response.statusCode).toBe(503)

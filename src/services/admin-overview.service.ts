@@ -7,7 +7,6 @@ import { daysAgo, startOfBrasiliaDay } from '../utils/brasilia-time'
 import { createTtlCache } from '../utils/ttl-cache'
 
 export const METRICS_TTL_MS = 60_000
-export const CATALOG_TTL_MS = 60_000
 export const SIGNUP_DAYS = 30
 const UNAVAILABLE = 'Não foi possível ler a visão geral agora.'
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -33,11 +32,23 @@ export function fillDays(
   }))
 }
 
+export interface CatalogSource {
+  overviewCatalog(now: Date): Promise<{
+    generatedAt: string
+    total: number
+    noCover: number
+    modesUnchecked: number
+    noSlug: number
+  }>
+}
+
 export class AdminOverviewService {
   private metricsCache = createTtlCache(METRICS_TTL_MS)
-  private catalogCache = createTtlCache(CATALOG_TTL_MS)
 
-  constructor(private store: OverviewStore) {}
+  constructor(
+    private store: OverviewStore,
+    private catalogSource: CatalogSource
+  ) {}
 
   metrics(now: Date = new Date()) {
     return this.metricsCache('metrics', () =>
@@ -83,11 +94,6 @@ export class AdminOverviewService {
   }
 
   catalog(now: Date = new Date()) {
-    return this.catalogCache('catalog', () =>
-      withReadLimit(async () => {
-        const counts = await this.store.catalogCounts()
-        return { generatedAt: now.toISOString(), ...counts }
-      }, UNAVAILABLE)
-    )
+    return this.catalogSource.overviewCatalog(now)
   }
 }
