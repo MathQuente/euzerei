@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { jobRef, truncateReason, REASON_MAX_LENGTH } from './admin-job-ref'
+import {
+  jobRef,
+  truncateReason,
+  REASON_MAX_LENGTH,
+  failedJobId,
+  FAILED_JOB_ID_PATTERN
+} from './admin-job-ref'
 
 describe('jobRef', () => {
   const id = 'steam-import-2f1c3a4e-5b6d-4e7f-8a9b-0c1d2e3f4a5b'
@@ -32,5 +38,25 @@ describe('truncateReason', () => {
 
     expect(cut).toHaveLength(REASON_MAX_LENGTH)
     expect(cut?.endsWith('…')).toBe(true)
+  })
+})
+
+describe('failedJobId', () => {
+  it('16 caracteres hex, estável e sem o jobId dentro', () => {
+    const id = failedJobId('psn', 'psn-import-user-1', 1_000)
+
+    expect(id).toMatch(FAILED_JOB_ID_PATTERN)
+    expect(failedJobId('psn', 'psn-import-user-1', 1_000)).toBe(id)
+    expect(id).not.toContain('user')
+  })
+
+  it('o mesmo jobId reaproveitado numa nova importação tem outro id', () => {
+    expect(failedJobId('psn', 'psn-import-user-1', 2_000)).not.toBe(
+      failedJobId('psn', 'psn-import-user-1', 1_000)
+    )
+  })
+
+  it('a fila entra no hash', () => {
+    expect(failedJobId('psn', 'x', 1)).not.toBe(failedJobId('xbox', 'x', 1))
   })
 })

@@ -1,4 +1,5 @@
 import type { Job, Queue } from 'bullmq'
+import { failedJobId } from '../utils/admin-job-ref'
 import {
   IMPORT_JOB_STATES,
   IMPORT_STORES,
@@ -47,6 +48,13 @@ function toRecord(
   }
 }
 
+/** O job foi substituído ou mudou de estado entre a checagem e a ação. */
+export class JobChangedError extends Error {
+  constructor() {
+    super('job changed')
+  }
+}
+
 export class ImportQueueRepository {
   constructor(
     private queues: ImportQueues,
@@ -90,6 +98,74 @@ export class ImportQueueRepository {
 
   isPaused(store: ImportStore): Promise<boolean> {
     return this.queues[store].isPaused()
+  }
+
+  /** Procura entre os `cap` falhos mais recentes o job cujo id opaco é `publicId`. */
+  async locateFailed(
+    store: ImportStore,
+    publicId: string,
+    cap: number
+  ): Promise<{ record: ImportJobRecord | null; truncated: boolean }> {
+    const queue = this.queues[store]
+    const [jobs, total] = await Promise.all([
+      queue.getJobs(['failed'], 0, cap - 1, false),
+      queue.getFailedCount()
+    ])
+    const job = jobs.find(
+      candidate =>
+        Boolean(candidate) &&
+        failedJobId(store, String(candidate.id), candidate.timestamp) ===
+          publicId
+    )
+    return {
+      record: job ? toRecord(job, store, 'failed') : null,
+      truncated: total > cap
+    }
+  }
+
+  /** 'missing' quando o job já não existe (foi descartado, ou substituído por uma nova importação). */
+  async stateOf(store: ImportStore, jobId: string): Promise<string> {
+    const job = await this.queues[store].getJob(jobId)
+    return job ? await job.getState() : 'missing'
+  }
+
+  /**
+   * Pega o job de novo logo antes de agir e só segue se ele ainda é a MESMA instância (timestamp) e ainda está
+   * falho. O jobId é reaproveitado a cada importação do usuário: uma reimportação entre a checagem do serviço e
+   * a ação faria `remove()` apagar a importação nova.
+   */
+  private async sameFailedJob(
+    store: ImportStore,
+    jobId: string,
+    expectedTimestamp: number
+  ) {
+    const job = await this.queues[store].getJob(jobId)
+    if (
+      !job ||
+      job.timestamp !== expectedTimestamp ||
+      (await job.getState()) !== 'failed'
+    ) {
+      throw new JobChangedError()
+    }
+    return job
+  }
+
+  async retryFailed(
+    store: ImportStore,
+    jobId: string,
+    expectedTimestamp: number
+  ): Promise<void> {
+    const job = await this.sameFailedJob(store, jobId, expectedTimestamp)
+    await job.retry('failed')
+  }
+
+  async removeJob(
+    store: ImportStore,
+    jobId: string,
+    expectedTimestamp: number
+  ): Promise<void> {
+    const job = await this.sameFailedJob(store, jobId, expectedTimestamp)
+    await job.remove()
   }
 
   async setPaused(store: ImportStore, paused: boolean): Promise<void> {

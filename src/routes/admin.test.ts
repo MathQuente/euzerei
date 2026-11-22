@@ -8,6 +8,8 @@ const auditQueryService = vi.hoisted(() => ({
   summary: vi.fn()
 }))
 const adminImportsService = vi.hoisted(() => ({
+  retryFailedJob: vi.fn(),
+  discardFailedJob: vi.fn(),
   setQueuePaused: vi.fn(),
   list: vi.fn(),
   summary: vi.fn(),
@@ -68,6 +70,8 @@ vi.mock('../services/admin-imports.service', () => ({
     failures = adminImportsService.failures
     queues = adminImportsService.queues
     setQueuePaused = adminImportsService.setQueuePaused
+    retryFailedJob = adminImportsService.retryFailedJob
+    discardFailedJob = adminImportsService.discardFailedJob
     failedJobs = adminImportsService.failedJobs
   }
 }))
@@ -185,6 +189,12 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ released: true })
   adminSecurityService.endSession.mockReset().mockResolvedValue({ ended: true })
+  adminImportsService.retryFailedJob
+    .mockReset()
+    .mockResolvedValue({ retried: true })
+  adminImportsService.discardFailedJob
+    .mockReset()
+    .mockResolvedValue({ discarded: true })
   adminImportsService.setQueuePaused
     .mockReset()
     .mockResolvedValue({ store: 'steam', paused: true, changed: true })
@@ -1449,6 +1459,123 @@ describe('ações de escrita da onda 1', () => {
     const response = await app.inject({
       method: 'DELETE',
       url: `/admin/security/blocks/${BLOCK_ID}`
+    })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.body).not.toContain('secret')
+  })
+})
+
+describe('ações de escrita da onda 2 (jobs falhos)', () => {
+  const JOB_ID = '0123456789abcdef'
+  const ACTIONS = [
+    ['POST', `/admin/queues/psn/jobs/${JOB_ID}/retry`],
+    ['DELETE', `/admin/queues/psn/jobs/${JOB_ID}`]
+  ] as const
+  const services = () => [
+    adminImportsService.retryFailedJob,
+    adminImportsService.discardFailedJob
+  ]
+
+  it.each(ACTIONS)(
+    '%s %s sem login: 401 e o serviço nunca é chamado',
+    async (method, url) => {
+      const app = await buildApp(denyAll)
+
+      expect((await app.inject({ method, url })).statusCode).toBe(401)
+      for (const service of services()) expect(service).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    ['POST', '/admin/queues/outra/jobs/0123456789abcdef/retry'],
+    ['DELETE', '/admin/queues/psn/jobs/xyz']
+  ] as const)('%s %s sem login dá 401 antes do 400', async (method, url) => {
+    const app = await buildApp(denyAll)
+
+    expect((await app.inject({ method, url })).statusCode).toBe(401)
+  })
+
+  it.each([
+    ['POST', '/admin/queues/outra/jobs/0123456789abcdef/retry'],
+    ['POST', '/admin/queues/psn/jobs/xyz/retry'],
+    ['POST', '/admin/queues/psn/jobs/0123456789ABCDEF/retry'],
+    ['DELETE', '/admin/queues/psn/jobs/psn-import%3Au1'],
+    ['DELETE', '/admin/queues/steam-import/jobs/0123456789abcdef']
+  ] as const)(
+    '%s %s com parâmetro inválido: 400 sem chegar ao serviço',
+    async (method, url) => {
+      const app = await buildApp(allowAdmin)
+
+      expect((await app.inject({ method, url })).statusCode).toBe(400)
+      for (const service of services()) expect(service).not.toHaveBeenCalled()
+    }
+  )
+
+  it('repetir passa a fila, o id e o admin', async () => {
+    const app = await buildApp(allowAdmin)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/admin/queues/psn/jobs/${JOB_ID}/retry`
+    })
+
+    expect(response.json()).toEqual({ retried: true })
+    expect(adminImportsService.retryFailedJob).toHaveBeenCalledWith(
+      'psn',
+      JOB_ID,
+      { actorId: 'admin-1', ip: expect.any(String) }
+    )
+  })
+
+  it('descartar passa a fila, o id e o admin', async () => {
+    const app = await buildApp(allowAdmin)
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/admin/queues/xbox/jobs/${JOB_ID}`
+    })
+
+    expect(response.json()).toEqual({ discarded: true })
+    expect(adminImportsService.discardFailedJob).toHaveBeenCalledWith(
+      'xbox',
+      JOB_ID,
+      { actorId: 'admin-1', ip: expect.any(String) }
+    )
+  })
+
+  it.each([
+    [404, 'Esse job não está mais entre os que falharam. Atualize a lista.'],
+    [409, 'O job mudou. Atualize a lista.'],
+    [503, 'Leitura parcial das falhas. Atualize a lista e tente de novo.']
+  ] as const)(
+    'o erro %s do serviço chega ao cliente com a mensagem',
+    async (status, message) => {
+      const app = await buildApp(allowAdmin)
+      adminImportsService.discardFailedJob.mockRejectedValue(
+        new ClientError(message, status)
+      )
+
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/admin/queues/psn/jobs/${JOB_ID}`
+      })
+
+      expect(response.statusCode).toBe(status)
+      expect(response.json().message).toBe(message)
+    }
+  )
+
+  it('uma falha inesperada é 500 genérico, sem detalhes internos', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminImportsService.retryFailedJob.mockRejectedValue(
+      new Error('ECONNREFUSED redis://secret')
+    )
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/admin/queues/psn/jobs/${JOB_ID}/retry`
     })
 
     expect(response.statusCode).toBe(500)
