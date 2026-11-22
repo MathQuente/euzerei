@@ -16,18 +16,10 @@ export interface SignupDay {
   count: number
 }
 
-export interface CatalogCounts {
-  total: number
-  noCover: number
-  modesUnchecked: number
-  noSlug: number
-}
-
 export interface OverviewStore {
   userTotals(weekAgo: Date): Promise<UserTotals>
   gamesTotal(): Promise<number>
   signupsByDay(since: Date): Promise<SignupDay[]>
-  catalogCounts(): Promise<CatalogCounts>
 }
 
 type UserRow = Omit<UserTotals, 'active7d'>
@@ -65,18 +57,5 @@ export class AdminOverviewRepository implements OverviewStore {
       WHERE created_at >= ${since}
       GROUP BY 1`
     return rows.map(row => ({ date: row.day, count: row.count }))
-  }
-
-  async catalogCounts(): Promise<CatalogCounts> {
-    const rows = await prisma.$queryRaw<CatalogCounts[]>`
-      SELECT
-        count(*)::int AS total,
-        (count(*) FILTER (WHERE cover_url IS NULL))::int AS "noCover",
-        (count(*) FILTER (
-          WHERE coalesce(array_length(game_modes, 1), 0) = 0
-            AND game_modes_checked_at IS NULL))::int AS "modesUnchecked",
-        (count(*) FILTER (WHERE slug IS NULL))::int AS "noSlug"
-      FROM games_cache`
-    return rows[0]
   }
 }
