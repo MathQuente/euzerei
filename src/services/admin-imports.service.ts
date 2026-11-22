@@ -1,5 +1,6 @@
 import {
   ImportQueueRepository,
+  JobChangedError,
   type QueueCounts
 } from '../repositories/import-queue.repository'
 import {
@@ -26,12 +27,20 @@ import { createTtlCache } from '../utils/ttl-cache'
 import { TimeoutError, withTimeout } from '../utils/with-timeout'
 import { ClientError } from '../errors/client-error'
 import { FAILED_JOBS_LIMIT } from '../schemas/admin-queues.schema'
-import { jobRef, truncateReason } from '../utils/admin-job-ref'
+import { failedJobId, jobRef, truncateReason } from '../utils/admin-job-ref'
 import type { AdminActor } from '../repositories/admin-security.repository'
-import { PAUSE_QUEUE_ACTION, RESUME_QUEUE_ACTION } from '../utils/audit-actions'
+import {
+  DISCARD_JOB_ACTION,
+  PAUSE_QUEUE_ACTION,
+  RESUME_QUEUE_ACTION,
+  RETRY_JOB_ACTION
+} from '../utils/audit-actions'
+import { AuditRepository } from '../repositories/audit.repository'
 import { AuditService } from './audit.service'
 
 export const SUMMARY_TTL_MS = 10_000
+export const FAILED_SCAN_CAP = 200
+const JOB_CHANGED = 'O job mudou. Atualize a lista.'
 export const QUEUE_READ_TIMEOUT_MS = 5_000
 const QUEUE_UNAVAILABLE = 'Não foi possível ler as filas agora.'
 export const DURATION_SAMPLE = 50
@@ -74,8 +83,128 @@ export class AdminImportsService {
   constructor(
     private queueRepository: ImportQueueRepository,
     private handles: HandleLookup,
-    private audit: Pick<AuditService, 'record'> = new AuditService()
+    private audit: Pick<AuditService, 'record'> = new AuditService(),
+    private strictAudit: Pick<
+      AuditRepository,
+      'create' | 'markFailed'
+    > = new AuditRepository()
   ) {}
+
+  /** Acha o job falho pelo id opaco. Leitura parcial que não acha não prova que o job sumiu: 503, não 404. */
+  private async locateFailed(store: ImportStore, id: string) {
+    const { record, truncated } = await readQueues(() =>
+      this.queueRepository.locateFailed(store, id, FAILED_SCAN_CAP)
+    )
+    if (record) return record
+    if (truncated) {
+      throw new ClientError(
+        'Leitura parcial das falhas. Atualize a lista e tente de novo.',
+        503
+      )
+    }
+    throw new ClientError(
+      'Esse job não está mais entre os que falharam. Atualize a lista.',
+      404
+    )
+  }
+
+  private async assertStillFailed(store: ImportStore, jobId: string) {
+    const state = await readQueues(() =>
+      this.queueRepository.stateOf(store, jobId)
+    )
+    if (state !== 'failed') throw new ClientError(JOB_CHANGED, 409)
+  }
+
+  /** O BullMQ recusou a ação: se o job mudou de estado no meio, é 409; senão o erro real sobe. */
+  private async failAction(
+    store: ImportStore,
+    jobId: string,
+    error: unknown
+  ): Promise<never> {
+    if (error instanceof JobChangedError) {
+      throw new ClientError(JOB_CHANGED, 409)
+    }
+    const state = await this.queueRepository
+      .stateOf(store, jobId)
+      .catch(() => null)
+    if (state !== null && state !== 'failed') {
+      throw new ClientError(JOB_CHANGED, 409)
+    }
+    throw error
+  }
+
+  private async jobTarget(
+    store: ImportStore,
+    jobId: string,
+    userId: string | null
+  ) {
+    const handle =
+      userId === null
+        ? null
+        : ((
+            await this.handles.findHandles([userId]).catch(() => new Map())
+          ).get(userId) ?? null)
+    return handle
+      ? `${jobRef(store, jobId)} · @${handle}`
+      : jobRef(store, jobId)
+  }
+
+  /** Repete um job falho: ele volta para a espera e o worker o pega (na fila pausada, só quando ela for retomada). */
+  async retryFailedJob(store: ImportStore, id: string, actor: AdminActor) {
+    const record = await this.locateFailed(store, id)
+    await this.assertStillFailed(store, record.id)
+    try {
+      await this.queueRepository.retryFailed(store, record.id, record.timestamp)
+    } catch (error) {
+      await this.failAction(store, record.id, error)
+    }
+    this.cached.clear()
+    await this.audit.record({
+      actorId: actor.actorId,
+      action: RETRY_JOB_ACTION,
+      area: 'IMPORTS',
+      target: await this.jobTarget(store, record.id, record.userId),
+      detail: 'o job voltou para a espera',
+      ip: actor.ip
+    })
+    return { retried: true }
+  }
+
+  /**
+   * Descarta um job falho, sem volta. A auditoria é gravada ANTES e de forma estrita: se ela falhar, nada é
+   * removido. Se a remoção falhar depois, a mesma linha vira FAILED em vez de continuar dizendo OK.
+   */
+  async discardFailedJob(store: ImportStore, id: string, actor: AdminActor) {
+    const record = await this.locateFailed(store, id)
+    await this.assertStillFailed(store, record.id)
+    let auditId: string
+    try {
+      const row = await this.strictAudit.create({
+        actorId: actor.actorId,
+        action: DISCARD_JOB_ACTION,
+        area: 'IMPORTS',
+        target: await this.jobTarget(store, record.id, record.userId),
+        detail: 'removido do Redis, sem volta',
+        ip: actor.ip
+      })
+      auditId = row.id
+    } catch {
+      throw new ClientError(
+        'Não foi possível registrar na auditoria. Nada foi descartado.',
+        503
+      )
+    }
+    try {
+      await this.queueRepository.removeJob(store, record.id, record.timestamp)
+    } catch (error) {
+      await this.strictAudit
+        .markFailed(auditId, 'não foi removido')
+        .catch(() => undefined)
+      await this.failAction(store, record.id, error)
+    }
+    this.cached.clear()
+    return { discarded: true }
+  }
 
   /** Pausa ou retoma uma fila. Pedir o estado em que ela já está não muda nada e não gera auditoria. */
   async setQueuePaused(store: ImportStore, paused: boolean, actor: AdminActor) {
@@ -380,6 +509,7 @@ export class AdminImportsService {
       total: reads.reduce((sum, read) => sum + read.total, 0),
       unavailable: reads.filter(read => !read.ok).map(read => read.store),
       items: records.map(record => ({
+        id: failedJobId(record.store, record.id, record.timestamp),
         ref: jobRef(record.store, record.id),
         store: record.store,
         handle:

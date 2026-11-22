@@ -3,7 +3,12 @@ import {
   AdminImportsService,
   QUEUE_READ_TIMEOUT_MS
 } from './admin-imports.service'
-import type { ImportQueueRepository } from '../repositories/import-queue.repository'
+import type { AuditEntryInput } from '../repositories/audit.repository'
+import { failedJobId } from '../utils/admin-job-ref'
+import {
+  JobChangedError,
+  type ImportQueueRepository
+} from '../repositories/import-queue.repository'
 import type { ImportJobRecord, ImportStore } from '../utils/import-jobs'
 
 function job(overrides: Partial<ImportJobRecord>): ImportJobRecord {
@@ -509,6 +514,7 @@ describe('AdminImportsService.failedJobs', () => {
     expect(result.unavailable).toEqual([])
     expect(result.items.map(i => i.store)).toEqual(['psn', 'steam'])
     expect(result.items[0]).toEqual({
+      id: expect.stringMatching(/^[0-9a-f]{16}$/),
       ref: expect.stringMatching(/^psn-import:[0-9a-f]{4}$/),
       store: 'psn',
       handle: 'ada',
@@ -679,5 +685,278 @@ describe('AdminImportsService.setQueuePaused', () => {
       'redis fora'
     )
     expect(repo.setPaused).not.toHaveBeenCalled()
+  })
+})
+
+describe('AdminImportsService: repetir e descartar job falho', () => {
+  const actor = { actorId: 'admin-1', ip: '10.0.0.5' }
+  const failedRecord = job({
+    id: 'psn-import-u1',
+    store: 'psn',
+    state: 'failed',
+    userId: 'u1',
+    timestamp: 1_000
+  })
+  const PUBLIC_ID = failedJobId('psn', 'psn-import-u1', 1_000)
+
+  const build = (
+    overrides: {
+      located?: { record: ImportJobRecord | null; truncated: boolean }
+      state?: string
+    } = {}
+  ) => {
+    const order: string[] = []
+    const repo = {
+      locateFailed: vi.fn(
+        async () =>
+          overrides.located ?? { record: failedRecord, truncated: false }
+      ),
+      stateOf: vi.fn(async () => overrides.state ?? 'failed'),
+      retryFailed: vi.fn(async () => {
+        order.push('retry')
+      }),
+      removeJob: vi.fn(async () => {
+        order.push('remove')
+      }),
+      counts: vi.fn(async () => ({
+        waiting: 0,
+        active: 0,
+        delayed: 0,
+        completed: 0,
+        failed: 0
+      })),
+      isPaused: vi.fn(async () => false),
+      workers: vi.fn(async () => 1),
+      finishedSince: vi.fn(async () => 0)
+    }
+    const audit = {
+      record: vi.fn<(entry: AuditEntryInput) => Promise<void>>(async () => {
+        order.push('audit')
+      })
+    }
+    const strictAudit = {
+      create: vi.fn<(entry: AuditEntryInput) => Promise<{ id: string }>>(
+        async () => {
+          order.push('audit-strict')
+          return { id: 'audit-1' }
+        }
+      ),
+      markFailed: vi.fn(async () => ({}))
+    }
+    const service = new AdminImportsService(
+      repo as unknown as ImportQueueRepository,
+      { findHandles: async () => new Map([['u1', 'kenzo']]) },
+      audit,
+      strictAudit as never
+    )
+    return { service, repo, audit, strictAudit, order }
+  }
+
+  describe('retryFailedJob', () => {
+    it('repete o job e audita com a referência e o @handle, nunca o jobId inteiro', async () => {
+      const { service, repo, audit } = build()
+
+      expect(await service.retryFailedJob('psn', PUBLIC_ID, actor)).toEqual({
+        retried: true
+      })
+      expect(repo.retryFailed).toHaveBeenCalledWith(
+        'psn',
+        'psn-import-u1',
+        1_000
+      )
+      const entry = audit.record.mock.calls[0][0]
+      expect(entry).toMatchObject({
+        action: 'Repetiu um job de importação',
+        area: 'IMPORTS',
+        ip: '10.0.0.5'
+      })
+      expect(entry.target).toMatch(/^psn-import:[0-9a-f]{4} · @kenzo$/)
+      expect(JSON.stringify(entry)).not.toContain('psn-import-u1')
+    })
+
+    it('id que não acha nenhum job: 404 e nada acontece', async () => {
+      const { service, repo, audit } = build({
+        located: { record: null, truncated: false }
+      })
+
+      await expect(
+        service.retryFailedJob('psn', PUBLIC_ID, actor)
+      ).rejects.toMatchObject({ statusCode: 404 })
+      expect(repo.retryFailed).not.toHaveBeenCalled()
+      expect(audit.record).not.toHaveBeenCalled()
+    })
+
+    it('varredura parcial que não acha o id: 503, não "não existe mais"', async () => {
+      const { service, repo } = build({
+        located: { record: null, truncated: true }
+      })
+
+      await expect(
+        service.retryFailedJob('psn', PUBLIC_ID, actor)
+      ).rejects.toMatchObject({ statusCode: 503 })
+      expect(repo.retryFailed).not.toHaveBeenCalled()
+    })
+
+    it('o job já não está falho (o usuário reimportou): 409 e não mexe no job novo', async () => {
+      const { service, repo } = build({ state: 'waiting' })
+
+      await expect(
+        service.retryFailedJob('psn', PUBLIC_ID, actor)
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        message: 'O job mudou. Atualize a lista.'
+      })
+      expect(repo.retryFailed).not.toHaveBeenCalled()
+    })
+
+    it('o job foi reimportado entre a checagem e a ação (mesmo jobId, outro timestamp): 409 e nada é auditado', async () => {
+      const { service, repo, audit } = build()
+      repo.retryFailed.mockRejectedValue(new JobChangedError())
+
+      await expect(
+        service.retryFailedJob('psn', PUBLIC_ID, actor)
+      ).rejects.toMatchObject({ statusCode: 409 })
+      expect(audit.record).not.toHaveBeenCalled()
+    })
+
+    it('o BullMQ recusou porque o job mudou no meio: 409', async () => {
+      const { service, repo } = build()
+      repo.retryFailed.mockRejectedValue(new Error('not in failed'))
+      repo.stateOf
+        .mockResolvedValueOnce('failed')
+        .mockResolvedValueOnce('active')
+
+      await expect(
+        service.retryFailedJob('psn', PUBLIC_ID, actor)
+      ).rejects.toMatchObject({ statusCode: 409 })
+    })
+
+    it('o BullMQ falhou com o job ainda falho: o erro real sobe e nada é auditado', async () => {
+      const { service, repo, audit } = build()
+      repo.retryFailed.mockRejectedValue(new Error('redis caiu'))
+
+      await expect(
+        service.retryFailedJob('psn', PUBLIC_ID, actor)
+      ).rejects.toThrow('redis caiu')
+      expect(audit.record).not.toHaveBeenCalled()
+    })
+
+    it('depois de repetir, a lista de filas não vem do cache', async () => {
+      const { service, repo } = build()
+      await service.queues()
+      await service.queues()
+      expect(repo.counts).toHaveBeenCalledTimes(3)
+
+      await service.retryFailedJob('psn', PUBLIC_ID, actor)
+      await service.queues()
+
+      expect(repo.counts).toHaveBeenCalledTimes(6)
+    })
+  })
+
+  describe('discardFailedJob', () => {
+    it('grava a auditoria ANTES de remover', async () => {
+      const { service, order, strictAudit } = build()
+
+      expect(await service.discardFailedJob('psn', PUBLIC_ID, actor)).toEqual({
+        discarded: true
+      })
+      expect(order).toEqual(['audit-strict', 'remove'])
+      expect(strictAudit.create.mock.calls[0][0]).toMatchObject({
+        action: 'Descartou um job de importação',
+        area: 'IMPORTS',
+        ip: '10.0.0.5'
+      })
+      expect(strictAudit.markFailed).not.toHaveBeenCalled()
+    })
+
+    it('a auditoria falhou: 503 e NADA é removido', async () => {
+      const { service, repo, strictAudit } = build()
+      strictAudit.create.mockRejectedValue(new Error('db fora'))
+
+      await expect(
+        service.discardFailedJob('psn', PUBLIC_ID, actor)
+      ).rejects.toMatchObject({
+        statusCode: 503,
+        message: 'Não foi possível registrar na auditoria. Nada foi descartado.'
+      })
+      expect(repo.removeJob).not.toHaveBeenCalled()
+    })
+
+    it('a remoção falhou: a mesma linha de auditoria vira FAILED e o erro sobe', async () => {
+      const { service, repo, strictAudit } = build()
+      repo.removeJob.mockRejectedValue(new Error('redis caiu'))
+
+      await expect(
+        service.discardFailedJob('psn', PUBLIC_ID, actor)
+      ).rejects.toThrow('redis caiu')
+      expect(strictAudit.create).toHaveBeenCalledTimes(1)
+      expect(strictAudit.markFailed).toHaveBeenCalledWith(
+        'audit-1',
+        expect.any(String)
+      )
+    })
+
+    it('a remoção falhou porque o job mudou no meio: 409 e a linha vira FAILED', async () => {
+      const { service, repo, strictAudit } = build()
+      repo.removeJob.mockRejectedValue(new Error('locked'))
+      repo.stateOf
+        .mockResolvedValueOnce('failed')
+        .mockResolvedValueOnce('waiting')
+
+      await expect(
+        service.discardFailedJob('psn', PUBLIC_ID, actor)
+      ).rejects.toMatchObject({ statusCode: 409 })
+      expect(strictAudit.markFailed).toHaveBeenCalledTimes(1)
+    })
+
+    it('reimportado entre a auditoria e a remoção: 409, a linha vira FAILED e o job novo não é tocado', async () => {
+      const { service, repo, strictAudit } = build()
+      repo.removeJob.mockRejectedValue(new JobChangedError())
+
+      await expect(
+        service.discardFailedJob('psn', PUBLIC_ID, actor)
+      ).rejects.toMatchObject({ statusCode: 409 })
+      expect(repo.removeJob).toHaveBeenCalledWith('psn', 'psn-import-u1', 1_000)
+      expect(strictAudit.markFailed).toHaveBeenCalledTimes(1)
+    })
+
+    it('id velho (reimportou e falhou de novo, outro timestamp): 404 e nada é gravado', async () => {
+      const { service, repo, strictAudit } = build({
+        located: { record: null, truncated: false }
+      })
+
+      await expect(
+        service.discardFailedJob(
+          'psn',
+          failedJobId('psn', 'psn-import-u1', 999),
+          actor
+        )
+      ).rejects.toMatchObject({ statusCode: 404 })
+      expect(strictAudit.create).not.toHaveBeenCalled()
+      expect(repo.removeJob).not.toHaveBeenCalled()
+    })
+
+    it('job que já não está falho: 409, sem auditoria e sem remover', async () => {
+      const { service, repo, strictAudit } = build({ state: 'completed' })
+
+      await expect(
+        service.discardFailedJob('psn', PUBLIC_ID, actor)
+      ).rejects.toMatchObject({ statusCode: 409 })
+      expect(strictAudit.create).not.toHaveBeenCalled()
+      expect(repo.removeJob).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('lista de falhas', () => {
+    it('cada item traz o id opaco que muda quando o job é reimportado', async () => {
+      const { service, repo } = setup([failedRecord])
+      expect(repo).toBeDefined()
+      const result = await service.failedJobs(undefined, new Date())
+      expect(result.items[0].id).toBe(PUBLIC_ID)
+      expect(result.items[0].id).toMatch(/^[0-9a-f]{16}$/)
+      expect(JSON.stringify(result)).not.toContain('psn-import-u1')
+      expect(failedJobId('psn', 'psn-import-u1', 2_000)).not.toBe(PUBLIC_ID)
+    })
   })
 })

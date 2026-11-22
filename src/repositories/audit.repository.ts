@@ -26,6 +26,14 @@ export class AuditRepository {
     })
   }
 
+  /** A ação que a linha registrava não aconteceu: a linha vira FAILED em vez de continuar dizendo OK. */
+  markFailed(id: string, detail: string) {
+    return prisma.auditLog.update({
+      where: { id },
+      data: { result: 'FAILED', detail }
+    })
+  }
+
   findPage(where: Prisma.AuditLogWhereInput, skip: number, take: number) {
     return prisma.$transaction([
       prisma.auditLog.count({ where }),

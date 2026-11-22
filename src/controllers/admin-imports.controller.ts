@@ -1,6 +1,7 @@
 import { FastifyReply, FastifyRequest } from 'fastify'
 import { ImportListQuerySchema } from '../schemas/admin-imports.schema'
 import {
+  FailedJobParamsSchema,
   FailedJobsQuerySchema,
   QueueStoreParamsSchema
 } from '../schemas/admin-queues.schema'
@@ -40,6 +41,28 @@ export class AdminImportsController {
 
     return reply.send(
       await this.adminImportsService.setQueuePaused(store, paused, {
+        actorId: request.user.userId,
+        ip: request.ip
+      })
+    )
+  }
+
+  async retryJob(request: FastifyRequest, reply: FastifyReply) {
+    const { store, id } = FailedJobParamsSchema.parse(request.params)
+
+    return reply.send(
+      await this.adminImportsService.retryFailedJob(store, id, {
+        actorId: request.user.userId,
+        ip: request.ip
+      })
+    )
+  }
+
+  async discardJob(request: FastifyRequest, reply: FastifyReply) {
+    const { store, id } = FailedJobParamsSchema.parse(request.params)
+
+    return reply.send(
+      await this.adminImportsService.discardFailedJob(store, id, {
         actorId: request.user.userId,
         ip: request.ip
       })

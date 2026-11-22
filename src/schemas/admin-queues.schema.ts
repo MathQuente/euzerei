@@ -15,3 +15,8 @@ export type FailedJobsQuery = z.infer<typeof FailedJobsQuerySchema>
 export const QueueStoreParamsSchema = z.object({
   store: z.enum(IMPORT_STORES)
 })
+
+export const FailedJobParamsSchema = z.object({
+  store: z.enum(IMPORT_STORES),
+  id: z.string().regex(/^[0-9a-f]{16}$/)
+})

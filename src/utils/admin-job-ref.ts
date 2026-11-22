@@ -16,3 +16,21 @@ export function truncateReason(reason: string | null): string | null {
     ? `${text.slice(0, REASON_MAX_LENGTH - 1)}…`
     : text
 }
+
+export const FAILED_JOB_ID_PATTERN = /^[0-9a-f]{16}$/
+
+/**
+ * Id opaco de UMA instância de job falho. O jobId do BullMQ é reaproveitado a cada importação do mesmo
+ * usuário, então o timestamp entra no hash: um job reimportado e que falhou de novo tem outro id, e um
+ * id velho dá 404 em vez de agir sobre uma falha que o admin não viu.
+ */
+export function failedJobId(
+  store: ImportStore,
+  jobId: string,
+  timestamp: number
+): string {
+  return createHash('sha256')
+    .update(`${store}:${jobId}:${timestamp}`)
+    .digest('hex')
+    .slice(0, 16)
+}

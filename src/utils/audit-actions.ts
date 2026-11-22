@@ -2,6 +2,8 @@ export const SUSPEND_ACCOUNT_ACTION = 'Suspendeu a conta'
 
 export const RELEASE_BLOCK_ACTION = 'Liberou um bloqueio de login'
 export const END_SESSION_ACTION = 'Encerrou uma sessão'
+export const RETRY_JOB_ACTION = 'Repetiu um job de importação'
+export const DISCARD_JOB_ACTION = 'Descartou um job de importação'
 export const PAUSE_QUEUE_ACTION = 'Pausou a fila de importação'
 export const RESUME_QUEUE_ACTION = 'Retomou a fila de importação'
 
