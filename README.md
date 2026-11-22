@@ -7,7 +7,7 @@
 
 [![CI](https://github.com/MathQuente/euzerei/actions/workflows/ci.yml/badge.svg)](https://github.com/MathQuente/euzerei/actions/workflows/ci.yml)
 
-API do EuZerei, um rastreador de biblioteca de jogos. Guarda cada jogo no status certo, com horas por plataforma, nota e review, e importa a biblioteca da Steam, da PSN e do Xbox.
+API do EuZerei, um rastreador de biblioteca de jogos: guarda cada jogo no status certo, com horas por plataforma, nota e review, e importa a biblioteca da Steam, da PSN e do Xbox.
 
 **Demo:** https://euzereiapp.vercel.app
 
@@ -24,7 +24,24 @@ Este repositório é a API. O front-end fica em [MathQuente/euzerei-front-end](h
 
 ## Stack
 
-Fastify 5, Prisma 7, PostgreSQL, Redis, BullMQ, Zod, `@fastify/jwt`, `@fastify/oauth2`, TypeScript. Testes com Vitest.
+- **API:** Fastify 5, TypeScript, Zod (validação e tipos das rotas)
+- **Banco:** PostgreSQL com Prisma 7
+- **Cache e filas:** Redis, ioredis e BullMQ
+- **Autenticação:** `@fastify/jwt`, `@fastify/cookie` e `@fastify/oauth2`
+- **Dados de jogos:** IGDB
+- **Qualidade:** Vitest nos testes, ESLint no lint, GitHub Actions no CI
+- **Hospedagem:** Render (API), Vercel (front-end)
+
+## Estrutura do repositório
+
+- `src/routes/` — rotas e schemas HTTP
+- `src/controllers/` — camada fina entre a rota e o service
+- `src/services/` — regras de negócio e cache-aside
+- `src/repositories/` — único ponto de acesso ao Prisma e ao Redis
+- `src/queues/` e `src/workers/` — jobs de importação (Steam, PSN, Xbox)
+- `src/scripts/` — sincronização com o IGDB e backfills
+- `prisma/` — schema, migrations e seeds
+- `docs/` — mapa do código e logo
 
 ## Arquitetura
 
@@ -48,7 +65,11 @@ Os dados do IGDB passam por três níveis:
 2. Um espelho no PostgreSQL (`games_cache`), sincronizado manualmente, para não depender da API externa em toda consulta.
 3. A API do IGDB, como fonte original.
 
-## Rodando localmente
+## Documentação
+
+- Mapa detalhado do código, com rotas, schema, fluxo de autenticação e importações: [`docs/CODEBASE_MAP.md`](docs/CODEBASE_MAP.md)
+
+## Como rodar
 
 Pré-requisitos: Node 22 ou mais novo e Docker.
 
@@ -84,6 +105,6 @@ O GitHub Actions (`.github/workflows/ci.yml`) roda em todo push e pull request: 
 
 A API roda na Render e o front-end na Vercel. O repositório também traz um `Dockerfile` e um `docker-compose.prod.yml` com Caddy, para hospedar por conta própria.
 
-## Documentação
+## Licença
 
-O mapa detalhado do código, com rotas, schema, fluxo de autenticação e importações, está em [docs/CODEBASE_MAP.md](docs/CODEBASE_MAP.md).
+[MIT](LICENSE)
