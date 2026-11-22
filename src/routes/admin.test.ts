@@ -15,6 +15,10 @@ const adminImportsService = vi.hoisted(() => ({
   failedJobs: vi.fn()
 }))
 const adminHealthService = vi.hoisted(() => ({ health: vi.fn() }))
+const adminOverviewService = vi.hoisted(() => ({
+  metrics: vi.fn(),
+  catalog: vi.fn()
+}))
 const adminSecurityService = vi.hoisted(() => ({
   summary: vi.fn(),
   blocks: vi.fn(),
@@ -59,6 +63,15 @@ vi.mock('../services/admin-health.service', () => ({
   AdminHealthService: class {
     health = adminHealthService.health
   }
+}))
+vi.mock('../services/admin-overview.service', () => ({
+  AdminOverviewService: class {
+    metrics = adminOverviewService.metrics
+    catalog = adminOverviewService.catalog
+  }
+}))
+vi.mock('../repositories/admin-overview.repository', () => ({
+  AdminOverviewRepository: class {}
 }))
 vi.mock('../services/admin-security.service', () => ({
   AdminSecurityService: class {
@@ -131,6 +144,8 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ total: 0, items: [], unavailable: [] })
   adminHealthService.health.mockReset().mockResolvedValue({ api: {} })
+  adminOverviewService.metrics.mockReset().mockResolvedValue({ users: null })
+  adminOverviewService.catalog.mockReset().mockResolvedValue({ total: 0 })
   adminSecurityService.summary.mockReset().mockResolvedValue({ blocks: null })
   adminSecurityService.blocks.mockReset().mockResolvedValue({ items: [] })
   adminSecurityService.sessions.mockReset().mockResolvedValue({ items: [] })
@@ -589,6 +604,69 @@ describe('GET /admin/queues/failed', () => {
 
     expect(response.statusCode).toBe(500)
     expect(response.json().message).toBe('Internal server error')
+  })
+})
+
+const OVERVIEW_PATHS = ['/admin/overview/metrics', '/admin/overview/catalog']
+
+describe('the overview reads are behind the admin guard', () => {
+  it.each(OVERVIEW_PATHS)(
+    '%s answers 401 and never reaches the service',
+    async url => {
+      const app = await buildApp(denyAll)
+
+      const response = await app.inject({ method: 'GET', url })
+
+      expect(response.statusCode).toBe(401)
+      expect(adminOverviewService.metrics).not.toHaveBeenCalled()
+      expect(adminOverviewService.catalog).not.toHaveBeenCalled()
+    }
+  )
+})
+
+describe('GET /admin/overview/*', () => {
+  it.each([
+    ['/admin/overview/metrics', () => adminOverviewService.metrics],
+    ['/admin/overview/catalog', () => adminOverviewService.catalog]
+  ] as const)('%s answers the service result', async (url, service) => {
+    const app = await buildApp(allowAdmin)
+    service().mockResolvedValue({ marker: url })
+
+    const response = await app.inject({ method: 'GET', url })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ marker: url })
+  })
+
+  it.each([
+    ['/admin/overview/metrics', () => adminOverviewService.metrics],
+    ['/admin/overview/catalog', () => adminOverviewService.catalog]
+  ] as const)(
+    '%s: a failure is a 500 with the generic message, no internals',
+    async (url, service) => {
+      const app = await buildApp(allowAdmin)
+      vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      service().mockRejectedValue(new Error('relation "games_cache" missing'))
+
+      const response = await app.inject({ method: 'GET', url })
+
+      expect(response.statusCode).toBe(500)
+      expect(response.json().message).toBe('Internal server error')
+    }
+  )
+
+  it('an unavailable read is a 503 with the message', async () => {
+    const app = await buildApp(allowAdmin)
+    adminOverviewService.catalog.mockRejectedValue(
+      new ClientError('Não foi possível ler a visão geral agora.', 503)
+    )
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/overview/catalog'
+    })
+
+    expect(response.statusCode).toBe(503)
   })
 })
 
