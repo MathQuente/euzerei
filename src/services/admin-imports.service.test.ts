@@ -163,6 +163,45 @@ describe('AdminImportsService.list', () => {
   })
 })
 
+describe('AdminImportsService.list with a limit', () => {
+  const many = Array.from({ length: 9 }, (_, n) =>
+    job({
+      id: `steam-import-u${n}`,
+      userId: `u${n}`,
+      finishedOn: 10_000 + n
+    })
+  )
+
+  it('returns only the newest N and says the page size is N', async () => {
+    const { service, repo } = setup(many)
+
+    const result = await service.list({ page: 1, limit: 6 })
+
+    expect(result.items).toHaveLength(6)
+    expect(result.pageSize).toBe(6)
+    expect(result.total).toBe(9)
+    expect(repo.newest).toHaveBeenCalledWith('steam', 'completed', 6)
+  })
+
+  it('page 2 continues after the first N', async () => {
+    const { service } = setup(many)
+
+    const result = await service.list({ page: 2, limit: 6 })
+
+    expect(result.items).toHaveLength(3)
+    expect(result.page).toBe(2)
+  })
+
+  it('without a limit nothing changes: page size 20', async () => {
+    const { service } = setup(many)
+
+    const result = await service.list({ page: 1 })
+
+    expect(result.pageSize).toBe(20)
+    expect(result.items).toHaveLength(9)
+  })
+})
+
 describe('AdminImportsService.summary', () => {
   const now = new Date('2026-11-20T15:00:00-03:00')
   const today = new Date('2026-11-20T10:00:00-03:00').getTime()

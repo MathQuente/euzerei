@@ -362,6 +362,28 @@ describe('GET /admin/imports', () => {
     })
   })
 
+  it('passes the limit through', async () => {
+    const app = await buildApp(allowAdmin)
+
+    await app.inject({ method: 'GET', url: '/admin/imports?limit=6' })
+
+    expect(adminImportsService.list).toHaveBeenCalledWith({
+      page: 1,
+      limit: 6
+    })
+  })
+
+  it('a bad limit is a 401, not a 400, for a stranger', async () => {
+    const app = await buildApp(denyAll)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/admin/imports?limit=0'
+    })
+
+    expect(response.statusCode).toBe(401)
+  })
+
   it('treats empty filters as absent', async () => {
     const app = await buildApp(allowAdmin)
 
@@ -376,7 +398,10 @@ describe('GET /admin/imports', () => {
     'status=warning',
     'store=epic',
     'page=0',
-    'page=26'
+    'page=26',
+    'limit=0',
+    'limit=21',
+    'limit=abc'
   ])('answers 400 for %s', async query => {
     const app = await buildApp(allowAdmin)
 

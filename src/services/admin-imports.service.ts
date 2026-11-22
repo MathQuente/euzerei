@@ -117,7 +117,8 @@ export class AdminImportsService {
     const states = query.status
       ? STATES_BY_STATUS_FILTER[query.status]
       : IMPORT_JOB_STATES
-    const need = query.page * IMPORTS_PAGE_SIZE
+    const pageSize = query.limit ?? IMPORTS_PAGE_SIZE
+    const need = query.page * pageSize
 
     const counts = await this.allCounts()
     const total = stores.reduce(
@@ -139,7 +140,7 @@ export class AdminImportsService {
     const records = (await Promise.all(reads)).flat()
     const pageRecords = records
       .sort((a, b) => sortKeyOf(b) - sortKeyOf(a))
-      .slice((query.page - 1) * IMPORTS_PAGE_SIZE, need)
+      .slice((query.page - 1) * pageSize, need)
 
     const ids = [
       ...new Set(
@@ -158,7 +159,7 @@ export class AdminImportsService {
         )
       ),
       page: query.page,
-      pageSize: IMPORTS_PAGE_SIZE,
+      pageSize,
       total
     }
   }
