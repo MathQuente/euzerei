@@ -99,7 +99,8 @@ describe('suspend', () => {
     const result = await service.suspend('u1', ACTOR)
 
     expect(result).toEqual({ changed: true })
-    expect(order).toEqual(['revoke', 'suspend'])
+    // depois do commit a marca é regravada: cobre o token emitido entre a primeira marca e o commit
+    expect(order).toEqual(['revoke', 'suspend', 'revoke'])
     expect(cache.set).toHaveBeenCalledWith(
       'sessions-revoked-at:u1',
       expect.any(Number),
@@ -132,6 +133,15 @@ describe('suspend', () => {
       statusCode: 503
     })
     expect(repository.suspend).not.toHaveBeenCalled()
+  })
+
+  it('regravar a marca depois do commit falha: a suspensão vale e o erro é só registrado', async () => {
+    cache.set
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('redis down'))
+
+    expect(await service.suspend('u1', ACTOR)).toEqual({ changed: true })
+    expect(cache.set).toHaveBeenCalledTimes(2)
   })
 
   it('corrida: outra requisição suspendeu primeiro, changed false', async () => {
@@ -191,7 +201,7 @@ describe('deleteAccount', () => {
     expect(await service.deleteAccount('u1', 'kenzo', ACTOR)).toEqual({
       deleted: true
     })
-    expect(order).toEqual(['audit', 'revoke', 'delete'])
+    expect(order).toEqual(['audit', 'revoke', 'delete', 'revoke'])
     expect(strictAudit.create).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'Excluiu a conta',

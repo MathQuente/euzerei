@@ -93,6 +93,19 @@ export class AdminUserActionsService {
     }
   }
 
+  /**
+   * Regrava a marca DEPOIS do commit: uma renovação que passou entre a primeira marca e o commit emitiu um token com
+   * `iat` posterior a ela, e esse token valeria até 15 min. A conta já está suspensa (ou apagada), então uma falha
+   * aqui só é registrada: não dá para desfazer o que foi feito.
+   */
+  private async remarkRevoked(id: string) {
+    try {
+      await markSessionsRevoked(this.cache as CacheRepository, id, 1)
+    } catch (error) {
+      logError('[Admin] session revocation after commit failed', error)
+    }
+  }
+
   async suspend(id: string, actor: UserActionActor, now: Date = new Date()) {
     const target = await this.requireTarget(id, actor)
     if (target.suspendedAt) return { changed: false }
@@ -108,7 +121,10 @@ export class AdminUserActionsService {
         'Sessões encerradas; a conta não consegue entrar.'
       )
     )
-    if (changed) await this.dropPendingEmailChange(id)
+    if (changed) {
+      await this.remarkRevoked(id)
+      await this.dropPendingEmailChange(id)
+    }
     return { changed }
   }
 
@@ -153,6 +169,7 @@ export class AdminUserActionsService {
       throw error
     }
 
+    await this.remarkRevoked(id)
     await this.cleanupAfterDelete(id, target)
     return { deleted: true }
   }
