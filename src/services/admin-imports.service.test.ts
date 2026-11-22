@@ -585,3 +585,99 @@ describe('AdminImportsService.failedJobs', () => {
     expect(result.items).toHaveLength(1)
   })
 })
+
+describe('AdminImportsService.setQueuePaused', () => {
+  const actor = { actorId: 'admin-1', ip: '10.0.0.5' }
+  const build = (paused = false) => {
+    const repo = {
+      isPaused: vi.fn(async () => paused),
+      setPaused: vi.fn(async () => undefined),
+      counts: vi.fn(async () => ({
+        waiting: 0,
+        active: 0,
+        delayed: 0,
+        completed: 0,
+        failed: 0
+      })),
+      workers: vi.fn(async () => 1),
+      finishedSince: vi.fn(async () => 0)
+    }
+    const audit = { record: vi.fn(async () => undefined) }
+    const service = new AdminImportsService(
+      repo as unknown as ImportQueueRepository,
+      { findHandles: async () => new Map() },
+      audit
+    )
+    return { service, repo, audit }
+  }
+
+  it('pausa uma fila rodando e audita na área IMPORTS', async () => {
+    const { service, repo, audit } = build(false)
+
+    expect(await service.setQueuePaused('steam', true, actor)).toEqual({
+      store: 'steam',
+      paused: true,
+      changed: true
+    })
+    expect(repo.setPaused).toHaveBeenCalledWith('steam', true)
+    expect(audit.record).toHaveBeenCalledWith({
+      actorId: 'admin-1',
+      action: 'Pausou a fila de importação',
+      area: 'IMPORTS',
+      target: 'steam-import',
+      detail: 'jobs ativos terminam e novas importações ficam esperando',
+      ip: '10.0.0.5'
+    })
+  })
+
+  it('retoma uma fila pausada', async () => {
+    const { service, repo, audit } = build(true)
+
+    expect(await service.setQueuePaused('psn', false, actor)).toMatchObject({
+      paused: false,
+      changed: true
+    })
+    expect(repo.setPaused).toHaveBeenCalledWith('psn', false)
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'Retomou a fila de importação',
+        target: 'psn-import',
+        detail: null
+      })
+    )
+  })
+
+  it('duplo clique: pedir o estado em que a fila já está não muda nem audita', async () => {
+    const { service, repo, audit } = build(true)
+
+    expect(await service.setQueuePaused('xbox', true, actor)).toEqual({
+      store: 'xbox',
+      paused: true,
+      changed: false
+    })
+    expect(repo.setPaused).not.toHaveBeenCalled()
+    expect(audit.record).not.toHaveBeenCalled()
+  })
+
+  it('depois de pausar, a lista de filas não vem do cache', async () => {
+    const { service, repo } = build(false)
+    await service.queues()
+    await service.queues()
+    expect(repo.counts).toHaveBeenCalledTimes(3)
+
+    await service.setQueuePaused('steam', true, actor)
+    await service.queues()
+
+    expect(repo.counts).toHaveBeenCalledTimes(6)
+  })
+
+  it('Redis fora na leitura: o erro sobe e nada é pausado', async () => {
+    const { service, repo } = build(false)
+    repo.isPaused.mockRejectedValue(new Error('redis fora'))
+
+    await expect(service.setQueuePaused('steam', true, actor)).rejects.toThrow(
+      'redis fora'
+    )
+    expect(repo.setPaused).not.toHaveBeenCalled()
+  })
+})

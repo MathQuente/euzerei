@@ -92,6 +92,11 @@ export class ImportQueueRepository {
     return this.queues[store].isPaused()
   }
 
+  async setPaused(store: ImportStore, paused: boolean): Promise<void> {
+    if (paused) await this.queues[store].pause()
+    else await this.queues[store].resume()
+  }
+
   async workers(store: ImportStore): Promise<number | null> {
     try {
       return (await this.queues[store].getWorkers()).length

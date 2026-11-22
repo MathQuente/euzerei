@@ -4,7 +4,7 @@ export function createTtlCache(ttlMs: number, now: () => number = Date.now) {
     { expiresAt: number; value: Promise<unknown> }
   >()
 
-  return function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+  function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
     const hit = entries.get(key)
     if (hit && hit.expiresAt > now()) return hit.value as Promise<T>
 
@@ -15,4 +15,6 @@ export function createTtlCache(ttlMs: number, now: () => number = Date.now) {
     })
     return value
   }
+  cached.clear = () => entries.clear()
+  return cached
 }

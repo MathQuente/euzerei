@@ -19,6 +19,12 @@ export async function adminSecurityRoutes(app: FastifyInstance) {
   typed.get('/sessions', async (request, reply) =>
     controller.sessions(request, reply)
   )
+  typed.delete('/blocks/:id', async (request, reply) =>
+    controller.releaseBlock(request, reply)
+  )
+  typed.delete('/sessions/:id', async (request, reply) =>
+    controller.endSession(request, reply)
+  )
   typed.get('/protections', async (request, reply) =>
     controller.protections(request, reply)
   )

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
   LOGIN_FAILURES_PER_EMAIL,
   LOGIN_FAILURES_PER_IP,
@@ -51,4 +52,11 @@ export function isBlocked(key: LoginKey, count: number): boolean {
 
 export function shortRef(hash: string): string {
   return hash.slice(0, 6)
+}
+
+export const BLOCK_ID_PATTERN = /^[0-9a-f]{16}$/
+
+/** Id opaco de um contador: o painel nunca recebe nem manda a chave do Redis. */
+export function blockId(key: string): string {
+  return createHash('sha256').update(key).digest('hex').slice(0, 16)
 }
