@@ -1,6 +1,9 @@
 import { FastifyReply, FastifyRequest } from 'fastify'
 import { ImportListQuerySchema } from '../schemas/admin-imports.schema'
-import { FailedJobsQuerySchema } from '../schemas/admin-queues.schema'
+import {
+  FailedJobsQuerySchema,
+  QueueStoreParamsSchema
+} from '../schemas/admin-queues.schema'
 import { AdminImportsService } from '../services/admin-imports.service'
 
 export class AdminImportsController {
@@ -18,6 +21,29 @@ export class AdminImportsController {
 
   async failures(_request: FastifyRequest, reply: FastifyReply) {
     return reply.send(await this.adminImportsService.failures())
+  }
+
+  async pauseQueue(request: FastifyRequest, reply: FastifyReply) {
+    return this.setQueuePaused(request, reply, true)
+  }
+
+  async resumeQueue(request: FastifyRequest, reply: FastifyReply) {
+    return this.setQueuePaused(request, reply, false)
+  }
+
+  private async setQueuePaused(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    paused: boolean
+  ) {
+    const { store } = QueueStoreParamsSchema.parse(request.params)
+
+    return reply.send(
+      await this.adminImportsService.setQueuePaused(store, paused, {
+        actorId: request.user.userId,
+        ip: request.ip
+      })
+    )
   }
 
   async queues(_request: FastifyRequest, reply: FastifyReply) {

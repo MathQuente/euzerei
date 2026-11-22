@@ -23,9 +23,15 @@ export interface SessionTotals {
 }
 
 export interface SessionRow {
+  id: string
   handle: string
   renewedAt: Date
   expiresAt: Date
+}
+
+export interface AdminActor {
+  actorId: string
+  ip: string
 }
 
 export interface SecurityStore {
@@ -34,6 +40,14 @@ export interface SecurityStore {
   handlesByEmailHash(hashes: string[]): Promise<Map<string, string>>
   sessionTotals(now: Date): Promise<SessionTotals>
   oldestSessions(now: Date, limit: number): Promise<SessionRow[]>
+  deleteKey(key: string): Promise<number>
+  /** Devolve o handle da sessão encerrada, ou null se ela já não está ativa. */
+  revokeSession(
+    id: string,
+    now: Date,
+    actor: AdminActor,
+    action: string
+  ): Promise<string | null>
   termsPending(version: string): Promise<number>
   emailsPending(): Promise<number>
 }
@@ -110,16 +124,55 @@ export class AdminSecurityRepository implements SecurityStore {
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: limit,
       select: {
+        id: true,
         createdAt: true,
         expiresAt: true,
         user: { select: { userName: true } }
       }
     })
     return rows.map(row => ({
+      id: row.id,
       handle: row.user.userName,
       renewedAt: row.createdAt,
       expiresAt: row.expiresAt
     }))
+  }
+
+  deleteKey(key: string) {
+    return redis.del(key)
+  }
+
+  async revokeSession(
+    id: string,
+    now: Date,
+    actor: AdminActor,
+    action: string
+  ): Promise<string | null> {
+    return prisma.$transaction(async tx => {
+      const active = { id, isValid: true, expiresAt: { gt: now } }
+      const row = await tx.refreshToken.findFirst({
+        where: active,
+        select: { user: { select: { userName: true } } }
+      })
+      if (!row) return null
+      const { count } = await tx.refreshToken.updateMany({
+        where: active,
+        data: { isValid: false }
+      })
+      if (count !== 1) return null
+      await tx.auditLog.create({
+        data: {
+          actorId: actor.actorId,
+          action,
+          area: 'USERS',
+          target: `@${row.user.userName}`,
+          detail: 'a renovação da sessão foi cancelada',
+          result: 'OK',
+          ip: actor.ip
+        }
+      })
+      return row.user.userName
+    })
   }
 
   termsPending(version: string) {

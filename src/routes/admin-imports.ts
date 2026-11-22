@@ -40,4 +40,10 @@ export async function adminQueuesRoutes(app: FastifyInstance) {
     .get('/failed', async (request, reply) =>
       controller.failedJobs(request, reply)
     )
+    .post('/:store/pause', async (request, reply) =>
+      controller.pauseQueue(request, reply)
+    )
+    .post('/:store/resume', async (request, reply) =>
+      controller.resumeQueue(request, reply)
+    )
 }

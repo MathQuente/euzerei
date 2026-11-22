@@ -27,6 +27,9 @@ import { TimeoutError, withTimeout } from '../utils/with-timeout'
 import { ClientError } from '../errors/client-error'
 import { FAILED_JOBS_LIMIT } from '../schemas/admin-queues.schema'
 import { jobRef, truncateReason } from '../utils/admin-job-ref'
+import type { AdminActor } from '../repositories/admin-security.repository'
+import { PAUSE_QUEUE_ACTION, RESUME_QUEUE_ACTION } from '../utils/audit-actions'
+import { AuditService } from './audit.service'
 
 export const SUMMARY_TTL_MS = 10_000
 export const QUEUE_READ_TIMEOUT_MS = 5_000
@@ -70,8 +73,28 @@ export class AdminImportsService {
 
   constructor(
     private queueRepository: ImportQueueRepository,
-    private handles: HandleLookup
+    private handles: HandleLookup,
+    private audit: Pick<AuditService, 'record'> = new AuditService()
   ) {}
+
+  /** Pausa ou retoma uma fila. Pedir o estado em que ela já está não muda nada e não gera auditoria. */
+  async setQueuePaused(store: ImportStore, paused: boolean, actor: AdminActor) {
+    const current = await readQueues(() => this.queueRepository.isPaused(store))
+    if (current === paused) return { store, paused, changed: false }
+    await this.queueRepository.setPaused(store, paused)
+    this.cached.clear()
+    await this.audit.record({
+      actorId: actor.actorId,
+      action: paused ? PAUSE_QUEUE_ACTION : RESUME_QUEUE_ACTION,
+      area: 'IMPORTS',
+      target: `${store}-import`,
+      detail: paused
+        ? 'jobs ativos terminam e novas importações ficam esperando'
+        : null,
+      ip: actor.ip
+    })
+    return { store, paused, changed: true }
+  }
 
   private async allCounts() {
     const entries = await Promise.all(

@@ -8,6 +8,7 @@ const auditQueryService = vi.hoisted(() => ({
   summary: vi.fn()
 }))
 const adminImportsService = vi.hoisted(() => ({
+  setQueuePaused: vi.fn(),
   list: vi.fn(),
   summary: vi.fn(),
   failures: vi.fn(),
@@ -28,6 +29,8 @@ const adminCatalogService = vi.hoisted(() => ({
   overviewCatalog: vi.fn()
 }))
 const adminSecurityService = vi.hoisted(() => ({
+  releaseBlock: vi.fn(),
+  endSession: vi.fn(),
   summary: vi.fn(),
   blocks: vi.fn(),
   sessions: vi.fn(),
@@ -64,6 +67,7 @@ vi.mock('../services/admin-imports.service', () => ({
     summary = adminImportsService.summary
     failures = adminImportsService.failures
     queues = adminImportsService.queues
+    setQueuePaused = adminImportsService.setQueuePaused
     failedJobs = adminImportsService.failedJobs
   }
 }))
@@ -96,6 +100,8 @@ vi.mock('../repositories/admin-overview.repository', () => ({
 }))
 vi.mock('../services/admin-security.service', () => ({
   AdminSecurityService: class {
+    releaseBlock = adminSecurityService.releaseBlock
+    endSession = adminSecurityService.endSession
     summary = adminSecurityService.summary
     blocks = adminSecurityService.blocks
     sessions = adminSecurityService.sessions
@@ -175,6 +181,13 @@ beforeEach(() => {
     .mockResolvedValue({ total: 0 })
   adminOverviewService.metrics.mockReset().mockResolvedValue({ users: null })
   adminOverviewService.catalog.mockReset().mockResolvedValue({ total: 0 })
+  adminSecurityService.releaseBlock
+    .mockReset()
+    .mockResolvedValue({ released: true })
+  adminSecurityService.endSession.mockReset().mockResolvedValue({ ended: true })
+  adminImportsService.setQueuePaused
+    .mockReset()
+    .mockResolvedValue({ store: 'steam', paused: true, changed: true })
   adminSecurityService.summary.mockReset().mockResolvedValue({ blocks: null })
   adminSecurityService.blocks.mockReset().mockResolvedValue({ items: [] })
   adminSecurityService.sessions.mockReset().mockResolvedValue({ items: [] })
@@ -1282,5 +1295,163 @@ describe('PUT /admin/settings', () => {
 
     expect(response.statusCode).toBe(500)
     expect(response.json().message).toBe('Internal server error')
+  })
+})
+
+describe('ações de escrita da onda 1', () => {
+  const BLOCK_ID = '0123456789abcdef'
+  const SESSION_ID = '7d71976e-7b52-4bee-92f1-a2b198d62431'
+  const ACTIONS = [
+    ['DELETE', `/admin/security/blocks/${BLOCK_ID}`],
+    ['DELETE', `/admin/security/sessions/${SESSION_ID}`],
+    ['POST', '/admin/queues/steam/pause'],
+    ['POST', '/admin/queues/psn/resume']
+  ] as const
+  const writeServices = () => [
+    adminSecurityService.releaseBlock,
+    adminSecurityService.endSession,
+    adminImportsService.setQueuePaused
+  ]
+
+  it.each(ACTIONS)(
+    '%s %s sem login: 401 e o serviço nunca é chamado',
+    async (method, url) => {
+      const app = await buildApp(denyAll)
+
+      const response = await app.inject({ method, url })
+
+      expect(response.statusCode).toBe(401)
+      for (const service of writeServices())
+        expect(service).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    ['DELETE', '/admin/security/blocks/xyz'],
+    ['DELETE', '/admin/security/sessions/abc'],
+    ['POST', '/admin/queues/outra/pause'],
+    ['POST', '/admin/queues/outra/resume']
+  ] as const)('%s %s sem login dá 401 antes do 400', async (method, url) => {
+    const app = await buildApp(denyAll)
+
+    expect((await app.inject({ method, url })).statusCode).toBe(401)
+  })
+
+  it.each([
+    ['DELETE', '/admin/security/blocks/xyz'],
+    ['DELETE', '/admin/security/blocks/0123456789ABCDEF'],
+    ['DELETE', '/admin/security/blocks/rate-limitPOST%2Fauth%2Flogin-1.1.1.1'],
+    ['DELETE', '/admin/security/sessions/abc'],
+    ['POST', '/admin/queues/outra/pause'],
+    ['POST', '/admin/queues/steam-import/resume']
+  ] as const)(
+    '%s %s com parâmetro inválido: 400 sem chegar ao serviço',
+    async (method, url) => {
+      const app = await buildApp(allowAdmin)
+
+      const response = await app.inject({ method, url })
+
+      expect(response.statusCode).toBe(400)
+      for (const service of writeServices())
+        expect(service).not.toHaveBeenCalled()
+    }
+  )
+
+  it('liberar bloqueio passa o id, o admin e o IP', async () => {
+    const app = await buildApp(allowAdmin)
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/admin/security/blocks/${BLOCK_ID}`
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ released: true })
+    expect(adminSecurityService.releaseBlock).toHaveBeenCalledWith(BLOCK_ID, {
+      actorId: 'admin-1',
+      ip: expect.any(String)
+    })
+  })
+
+  it('encerrar sessão passa o id e o admin', async () => {
+    const app = await buildApp(allowAdmin)
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/admin/security/sessions/${SESSION_ID}`
+    })
+
+    expect(response.json()).toEqual({ ended: true })
+    expect(adminSecurityService.endSession).toHaveBeenCalledWith(SESSION_ID, {
+      actorId: 'admin-1',
+      ip: expect.any(String)
+    })
+  })
+
+  it('bloqueio expirado: 404 com a mensagem do serviço; sessão renovada: 409', async () => {
+    const app = await buildApp(allowAdmin)
+    adminSecurityService.releaseBlock.mockRejectedValue(
+      new ClientError('Esse bloqueio já expirou.', 404)
+    )
+    adminSecurityService.endSession.mockRejectedValue(
+      new ClientError('A sessão foi renovada. Atualize a lista.', 409)
+    )
+
+    const expired = await app.inject({
+      method: 'DELETE',
+      url: `/admin/security/blocks/${BLOCK_ID}`
+    })
+    const renewed = await app.inject({
+      method: 'DELETE',
+      url: `/admin/security/sessions/${SESSION_ID}`
+    })
+
+    expect(expired.statusCode).toBe(404)
+    expect(expired.json().message).toBe('Esse bloqueio já expirou.')
+    expect(renewed.statusCode).toBe(409)
+    expect(renewed.json().message).toBe(
+      'A sessão foi renovada. Atualize a lista.'
+    )
+  })
+
+  it.each([
+    ['pause', true],
+    ['resume', false]
+  ] as const)(
+    'POST /admin/queues/:store/%s chama o serviço com o estado certo',
+    async (verb, paused) => {
+      const app = await buildApp(allowAdmin)
+
+      const response = await app.inject({
+        method: 'POST',
+        url: `/admin/queues/xbox/${verb}`
+      })
+
+      expect(response.statusCode).toBe(200)
+      expect(adminImportsService.setQueuePaused).toHaveBeenCalledWith(
+        'xbox',
+        paused,
+        {
+          actorId: 'admin-1',
+          ip: expect.any(String)
+        }
+      )
+    }
+  )
+
+  it('uma falha inesperada é 500 genérico, sem detalhes internos', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminSecurityService.releaseBlock.mockRejectedValue(
+      new Error('ECONNREFUSED redis://secret')
+    )
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/admin/security/blocks/${BLOCK_ID}`
+    })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.body).not.toContain('secret')
   })
 })

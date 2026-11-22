@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { AdminSecurityService, BLOCKS_LIMIT } from './admin-security.service'
 import { READ_TIMEOUT_MS } from '../utils/admin-read-limit'
-import { classifyLoginKey } from '../utils/admin-security-keys'
+import { blockId, classifyLoginKey } from '../utils/admin-security-keys'
+import type { AuditEntryInput } from '../repositories/audit.repository'
 import type {
   KeyCounter,
   SecurityStore
@@ -32,11 +33,14 @@ function setup(
     sessionTotals: vi.fn(async () => ({ sessions: 214, users: 180 })),
     oldestSessions: vi.fn(async () => [
       {
+        id: '7d71976e-7b52-4bee-92f1-a2b198d62431',
         handle: 'maria.rpg',
         renewedAt: new Date('2026-11-14T10:00:00.000Z'),
         expiresAt: new Date('2026-11-21T10:00:00.000Z')
       }
     ]),
+    deleteKey: vi.fn(async () => 1),
+    revokeSession: vi.fn(async () => 'maria.rpg'),
     termsPending: vi.fn(async () => 58),
     emailsPending: vi.fn(async () => 9),
     ...overrides
@@ -71,6 +75,7 @@ describe('AdminSecurityService.blocks', () => {
       ['ip', 4]
     ])
     expect(result.items[0]).toEqual({
+      id: blockId('rate-limitPOST/auth/login-187.4.22.91'),
       kind: 'ip',
       route: 'login',
       target: '187.4.22.91',
@@ -218,6 +223,7 @@ describe('AdminSecurityService.sessions', () => {
       users: 180,
       items: [
         {
+          id: '7d71976e-7b52-4bee-92f1-a2b198d62431',
           handle: 'maria.rpg',
           renewedAt: '2026-11-14T10:00:00.000Z',
           expiresAt: '2026-11-21T10:00:00.000Z'
@@ -289,6 +295,192 @@ describe('AdminSecurityService.protections', () => {
       recentAuthMinutes: 10,
       emailVerificationRequired: false,
       maxSessionsPerUser: 10
+    })
+  })
+})
+
+describe('AdminSecurityService: ações', () => {
+  const actor = { actorId: 'admin-1', ip: '10.0.0.5' }
+  const audit = () => ({
+    record: vi.fn<(entry: AuditEntryInput) => Promise<void>>(
+      async () => undefined
+    )
+  })
+  const build = (
+    counters: KeyCounter[],
+    overrides: Partial<SecurityStore> = {}
+  ) => {
+    const log = audit()
+    const store: SecurityStore = {
+      scanLoginKeys: vi.fn(async () => scanned(...counters.map(c => c.key))),
+      counters: vi.fn(async keys =>
+        counters.filter(counter => keys.includes(counter.key))
+      ),
+      handlesByEmailHash: vi.fn(async () => new Map([[EMAIL_A, 'kenzo']])),
+      sessionTotals: vi.fn(async () => ({ sessions: 1, users: 1 })),
+      oldestSessions: vi.fn(async () => []),
+      deleteKey: vi.fn(async () => 1),
+      revokeSession: vi.fn(async () => 'maria.rpg'),
+      termsPending: vi.fn(async () => 0),
+      emailsPending: vi.fn(async () => 0),
+      ...overrides
+    }
+    return { service: new AdminSecurityService(store, {}, log), store, log }
+  }
+
+  describe('releaseBlock', () => {
+    const ip = ipCounter('187.4.22.91', 12)
+
+    it('apaga só a chave achada pelo id e audita com o IP', async () => {
+      const { service, store, log } = build([ip, ipCounter('2.2.2.2', 9)])
+
+      expect(await service.releaseBlock(blockId(ip.key), actor)).toEqual({
+        released: true
+      })
+      expect(store.deleteKey).toHaveBeenCalledTimes(1)
+      expect(store.deleteKey).toHaveBeenCalledWith(ip.key)
+      expect(log.record).toHaveBeenCalledWith({
+        actorId: 'admin-1',
+        action: 'Liberou um bloqueio de login',
+        area: 'USERS',
+        target: '187.4.22.91',
+        detail: 'limite de requisições de login (login)',
+        ip: '10.0.0.5'
+      })
+    })
+
+    it('bloqueio por e-mail audita o handle, nunca o hash inteiro', async () => {
+      const key = `login-failures:${EMAIL_A}`
+      const { service, log } = build([{ key, count: 49, pttlMs: 5_000 }])
+
+      await service.releaseBlock(blockId(key), actor)
+
+      const entry = vi.mocked(log.record).mock.calls[0][0]
+      expect(entry.target).toBe('@kenzo')
+      expect(JSON.stringify(entry)).not.toContain(EMAIL_A)
+    })
+
+    it('sem handle conhecido audita só o prefixo do hash', async () => {
+      const key = `login-failures:${EMAIL_B}`
+      const { service, log } = build([{ key, count: 49, pttlMs: 5_000 }], {
+        handlesByEmailHash: vi.fn(async () => new Map())
+      })
+
+      await service.releaseBlock(blockId(key), actor)
+
+      expect(vi.mocked(log.record).mock.calls[0][0].target).toBe('bbbbbb')
+    })
+
+    it('id que não corresponde a nenhuma chave: 404 "já expirou", nada é apagado', async () => {
+      const { service, store, log } = build([ip])
+
+      await expect(
+        service.releaseBlock('0123456789abcdef', actor)
+      ).rejects.toMatchObject({
+        statusCode: 404,
+        message: 'Esse bloqueio já expirou.'
+      })
+      expect(store.deleteKey).not.toHaveBeenCalled()
+      expect(log.record).not.toHaveBeenCalled()
+    })
+
+    it('varredura parcial sem achar o id: 503, não "já expirou"', async () => {
+      const { service, store } = build([ip], {
+        scanLoginKeys: vi.fn(async () => ({ keys: [], truncated: true }))
+      })
+
+      await expect(
+        service.releaseBlock(blockId(ip.key), actor)
+      ).rejects.toMatchObject({
+        statusCode: 503,
+        message: 'Leitura parcial do Redis. Atualize a lista e tente de novo.'
+      })
+      expect(store.deleteKey).not.toHaveBeenCalled()
+    })
+
+    it('varredura parcial mas o id foi achado: libera normalmente', async () => {
+      const { service, store } = build([ip], {
+        scanLoginKeys: vi.fn(async () => ({
+          keys: [{ key: ip.key, login: classifyLoginKey(ip.key)! }],
+          truncated: true
+        }))
+      })
+
+      await service.releaseBlock(blockId(ip.key), actor)
+
+      expect(store.deleteKey).toHaveBeenCalledWith(ip.key)
+    })
+
+    it('a chave sumiu entre a varredura e a leitura: 404', async () => {
+      const { service, store } = build([ip], {
+        counters: vi.fn(async () => [])
+      })
+
+      await expect(
+        service.releaseBlock(blockId(ip.key), actor)
+      ).rejects.toMatchObject({ statusCode: 404 })
+      expect(store.deleteKey).not.toHaveBeenCalled()
+    })
+
+    it('duplo clique: o segundo DEL não apaga nada, dá 404 e não audita de novo', async () => {
+      const { service, log } = build([ip], {
+        deleteKey: vi.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(0)
+      })
+
+      await service.releaseBlock(blockId(ip.key), actor)
+      await expect(
+        service.releaseBlock(blockId(ip.key), actor)
+      ).rejects.toMatchObject({ statusCode: 404 })
+      expect(log.record).toHaveBeenCalledTimes(1)
+    })
+
+    it('depois de liberar, a lista deixa de vir do cache', async () => {
+      const { service, store } = build([ip])
+      await service.blocks(now)
+      await service.blocks(now)
+      expect(store.scanLoginKeys).toHaveBeenCalledTimes(1)
+
+      await service.releaseBlock(blockId(ip.key), actor)
+      await service.blocks(now)
+
+      expect(store.scanLoginKeys).toHaveBeenCalledTimes(3)
+    })
+  })
+
+  describe('endSession', () => {
+    const id = '7d71976e-7b52-4bee-92f1-a2b198d62431'
+
+    it('revoga pelo id, passa o ator e a ação para a transação', async () => {
+      const { service, store } = build([])
+
+      expect(await service.endSession(id, actor, now)).toEqual({ ended: true })
+      expect(store.revokeSession).toHaveBeenCalledWith(
+        id,
+        now,
+        actor,
+        'Encerrou uma sessão'
+      )
+    })
+
+    it('sessão já renovada ou inválida: 409 com o aviso para atualizar', async () => {
+      const { service } = build([], { revokeSession: vi.fn(async () => null) })
+
+      await expect(service.endSession(id, actor, now)).rejects.toMatchObject({
+        statusCode: 409,
+        message: 'A sessão foi renovada. Atualize a lista.'
+      })
+    })
+
+    it('depois de encerrar, a lista de sessões deixa de vir do cache', async () => {
+      const { service, store } = build([])
+      await service.sessions(now)
+      await service.sessions(now)
+      expect(store.oldestSessions).toHaveBeenCalledTimes(1)
+
+      await service.endSession(id, actor, now)
+      await service.sessions(now)
+
+      expect(store.oldestSessions).toHaveBeenCalledTimes(2)
     })
   })
 })

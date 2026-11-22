@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
+  BLOCK_ID_PATTERN,
+  blockId,
   blockLimit,
   classifyLoginKey,
   isBlocked,
@@ -73,5 +75,22 @@ describe('shortRef', () => {
   it('is the first 6 hex characters only', () => {
     expect(shortRef(HASH_A)).toBe('aaaaaa')
     expect(shortRef(HASH_A)).toHaveLength(6)
+  })
+})
+
+describe('blockId', () => {
+  it('é um prefixo hex de 16 caracteres, estável e sem revelar a chave', () => {
+    const key = 'rate-limitPOST/auth/login-187.4.22.91'
+    const id = blockId(key)
+
+    expect(id).toMatch(BLOCK_ID_PATTERN)
+    expect(blockId(key)).toBe(id)
+    expect(id).not.toContain('187')
+  })
+
+  it('chaves diferentes dão ids diferentes', () => {
+    expect(blockId('login-failures:' + 'a'.repeat(64))).not.toBe(
+      blockId('login-failures:' + 'b'.repeat(64))
+    )
   })
 })

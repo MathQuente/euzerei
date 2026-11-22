@@ -11,3 +11,7 @@ export const FailedJobsQuerySchema = z.object({
 })
 
 export type FailedJobsQuery = z.infer<typeof FailedJobsQuerySchema>
+
+export const QueueStoreParamsSchema = z.object({
+  store: z.enum(IMPORT_STORES)
+})

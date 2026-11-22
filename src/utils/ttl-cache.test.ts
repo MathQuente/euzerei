@@ -54,3 +54,19 @@ describe('createTtlCache', () => {
     expect(load).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('createTtlCache.clear', () => {
+  it('esquece tudo: a próxima leitura carrega de novo', async () => {
+    const cached = createTtlCache(60_000)
+    const load = vi.fn(async () => 'v')
+
+    await cached('a', load)
+    await cached('a', load)
+    expect(load).toHaveBeenCalledTimes(1)
+
+    cached.clear()
+    await cached('a', load)
+
+    expect(load).toHaveBeenCalledTimes(2)
+  })
+})
