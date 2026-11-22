@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    # Os testes mockam banco, Redis e rede (o fetch real é bloqueado em
+    # vitest.setup.ts). Só precisam destas variáveis para os módulos importarem;
+    # os valores são fictícios e nenhum serviço externo é acessado.
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test
+      REDIS_URL: redis://localhost:6379
+      SECRET_JWT_KEY: ci-only-secret-key-0123456789abcdef
+      FRONTEND_URL: http://localhost:5173
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run lint
+      - run: npm test
