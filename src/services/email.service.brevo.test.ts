@@ -74,6 +74,25 @@ describe('EmailService through Brevo', () => {
     )
   })
 
+  it('asks replies to go to the sender address', async () => {
+    await new EmailService().sendPasswordResetEmail('a@a.com', 'https://x.test')
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).replyTo).toEqual({
+      name: 'EuZerei',
+      email: 'suporte@exemplo.test'
+    })
+  })
+
+  it('lets MAIL_REPLY_TO override where replies go', async () => {
+    vi.stubEnv('MAIL_REPLY_TO', 'contato@exemplo.test')
+
+    await new EmailService().sendPasswordResetEmail('a@a.com', 'https://x.test')
+
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).replyTo.email).toBe(
+      'contato@exemplo.test'
+    )
+  })
+
   it('fails with a clear error and sends nothing when MAIL_FROM is missing', async () => {
     vi.stubEnv('MAIL_FROM', '')
 

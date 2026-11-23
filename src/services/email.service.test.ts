@@ -13,6 +13,7 @@ describe('EmailService', () => {
   beforeEach(() => {
     sendMail.mockReset().mockResolvedValue({})
     createTransport.mockClear()
+    vi.stubEnv('BREVO_API_KEY', '')
     vi.stubEnv('MAIL_USERNAME', 'euzerei.suporte@gmail.com')
     vi.stubEnv('MAIL_PASSWORD', 'app-password')
     vi.stubEnv('MAIL_HOST', '')
