@@ -61,6 +61,12 @@ export class EmailService {
           name: process.env.MAIL_FROM_NAME || 'EuZerei',
           email: senderEmail
         },
+        // O Brevo troca o remetente de provedores gratuitos por um endereço dele;
+        // o Reply-To faz a resposta chegar ao endereço real.
+        replyTo: {
+          name: process.env.MAIL_FROM_NAME || 'EuZerei',
+          email: process.env.MAIL_REPLY_TO || senderEmail
+        },
         to: [{ email: to }],
         subject,
         htmlContent: html,
