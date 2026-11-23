@@ -12,12 +12,26 @@ import { ProviderLinkError } from '../errors/provider-link-error'
 import type { OAuthState } from '../utils/oauth-state'
 import type { OAuthProvider } from '../services/auth.service'
 
+function isRateLimited(error: unknown) {
+  const e = error as {
+    statusCode?: number
+    output?: { statusCode?: number }
+    data?: { res?: { statusCode?: number } }
+  }
+  return (
+    (e?.output?.statusCode ?? e?.statusCode ?? e?.data?.res?.statusCode) === 429
+  )
+}
+
 export class AuthController {
   constructor(private authService: AuthService) {}
 
   private oauthErrorCode(error: unknown) {
     if (error instanceof TermsRequiredError) return 'terms_required'
     if (error instanceof AccountSuspendedError) return 'account_suspended'
+    if (error instanceof ClientError && error.statusCode === 429) {
+      return 'rate_limited'
+    }
     if (error instanceof ClientError && error.statusCode === 403) {
       return 'email_not_verified'
     }
@@ -373,7 +387,12 @@ export class AuthController {
 
       const tokenResponse = await oauth2
         .getAccessTokenFromAuthorizationCodeFlow(request)
-        .catch(async () => {
+        .catch(async (pluginError: unknown) => {
+          // Com o Discord já limitando, repetir o pedido só gasta mais do limite.
+          if (isRateLimited(pluginError)) {
+            throw new ClientError('Discord limitou a troca de token.', 429)
+          }
+
           const params = new URLSearchParams({
             code,
             client_id: process.env.DISCORD_CLIENT_ID!,
@@ -389,6 +408,14 @@ export class AuthController {
           })
 
           if (!response.ok) {
+            if (response.status === 429) {
+              console.error('Discord token rate limit:', {
+                retryAfter: response.headers.get('retry-after'),
+                server: response.headers.get('server'),
+                body: (await response.text().catch(() => '')).slice(0, 200)
+              })
+              throw new ClientError('Discord limitou a troca de token.', 429)
+            }
             throw new ClientError(
               `Falha na troca de token (status ${response.status})`,
               502
