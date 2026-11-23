@@ -60,6 +60,21 @@ describe('ReviewService.reportReview', () => {
     expect(reviewRepository.createReport).not.toHaveBeenCalled()
   })
 
+  it('answers 404 when the review is hidden: it left the game page, so the reporter no longer sees it', async () => {
+    const { service, reviewRepository } = build({
+      findByUserGame: vi.fn().mockResolvedValue({
+        id: 'rv-1',
+        updatedAt: UPDATED,
+        hiddenAt: new Date()
+      })
+    })
+
+    await expect(
+      service.reportReview(7, 'author', 'reporter', 'SPAM')
+    ).rejects.toMatchObject({ statusCode: 404 })
+    expect(reviewRepository.createReport).not.toHaveBeenCalled()
+  })
+
   it('answers 409 when the same person already reported it', async () => {
     const duplicate = new Prisma.PrismaClientKnownRequestError('dup', {
       code: 'P2002',

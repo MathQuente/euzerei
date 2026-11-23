@@ -104,7 +104,10 @@ export class ReviewService {
     }
 
     const review = await this.reviewRepository.findByUserGame(igdbId, authorId)
-    if (!review) throw new ClientError('Resenha não encontrada.', 404)
+    // Uma review oculta já saiu da página do jogo: quem denuncia não a enxerga mais.
+    if (!review || review.hiddenAt) {
+      throw new ClientError('Resenha não encontrada.', 404)
+    }
 
     try {
       await this.reviewRepository.createReport({

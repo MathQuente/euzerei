@@ -1,14 +1,22 @@
 import { ClientError } from '../errors/client-error'
 import { AdminReviewsRepository } from '../repositories/admin-reviews.repository'
-import {
-  ADMIN_REVIEWS_PAGE_SIZE,
-  type AdminReviewsListQuery
-} from '../schemas/admin-reviews.schema'
+import type { AdminReviewsListQuery } from '../schemas/admin-reviews.schema'
 import { daysAgo } from '../utils/brasilia-time'
 import { withReadLimit } from '../utils/admin-read-limit'
 
 const EXCERPT_LENGTH = 120
 const READ_ERROR = 'A leitura das reviews demorou demais.'
+
+export type ReviewStatus = 'open' | 'resolved' | 'hidden'
+
+/** Oculta > aberta > resolvida. A mesma regra vale no filtro da lista e no selo do painel. */
+export function statusOf(
+  hiddenAt: Date | null,
+  openReports: number
+): ReviewStatus {
+  if (hiddenAt !== null) return 'hidden'
+  return openReports > 0 ? 'open' : 'resolved'
+}
 
 function excerptOf(text: string): string {
   const flat = text.replace(/\s+/g, ' ').trim()
@@ -28,36 +36,48 @@ export class AdminReviewsService {
         this.repository.findQueue(
           query.status,
           query.q,
-          (query.page - 1) * ADMIN_REVIEWS_PAGE_SIZE,
-          ADMIN_REVIEWS_PAGE_SIZE
+          (query.page - 1) * query.limit,
+          query.limit
         ),
       READ_ERROR
     )
 
     return {
-      items: rows.map(row => ({
-        id: row.id,
-        excerpt: excerptOf(row.excerpt),
-        handle: row.handle,
-        game: { igdbId: row.igdbId, name: row.gameName },
-        openReports: row.openReports,
-        mainReason: row.mainReason ? row.mainReason.toLowerCase() : null,
-        oldestOpenAt: row.oldestOpenAt?.toISOString() ?? null,
-        lastReportAt: row.lastReportAt.toISOString(),
-        editedAfterReport: row.editedAfterReport
-      })),
+      items: rows.map(row => {
+        const status = statusOf(row.hiddenAt, row.openReports)
+        return {
+          id: row.id,
+          excerpt: excerptOf(row.excerpt),
+          handle: row.handle,
+          game: { igdbId: row.igdbId, name: row.gameName },
+          status,
+          openReports: row.openReports,
+          totalReports: row.totalReports,
+          mainReason: row.mainReason ? row.mainReason.toLowerCase() : null,
+          // A idade que a coluna "Há" mostra: da denúncia aberta, da decisão ou do momento em que foi ocultada.
+          since: (
+            (status === 'open'
+              ? row.oldestOpenAt
+              : status === 'hidden'
+                ? row.hiddenAt
+                : row.lastResolvedAt) ?? row.lastActivityAt
+          ).toISOString(),
+          editedAfterReport: row.editedAfterReport
+        }
+      }),
       page: query.page,
-      pageSize: ADMIN_REVIEWS_PAGE_SIZE,
+      pageSize: query.limit,
       total
     }
   }
 
   async summary(now: Date = new Date()) {
-    const [openReports, openReviews, oldest, published, published7d] =
-      await withReadLimit(
-        () => this.repository.summaryCounts(daysAgo(now, 7)),
-        READ_ERROR
-      )
+    const { counts, decisionDays } = await withReadLimit(
+      () => this.repository.summaryCounts(daysAgo(now, 7), daysAgo(now, 30)),
+      READ_ERROR
+    )
+    const [openReports, openReviews, oldest, published, published7d, hidden] =
+      counts
 
     return {
       openReports,
@@ -65,9 +85,9 @@ export class AdminReviewsService {
       oldestOpenAt: oldest._min.createdAt?.toISOString() ?? null,
       published,
       published7d,
-      // Chegam com a moderação (onda b): ainda não existe ocultar nem decidir.
-      hidden: null,
-      decisionDays: null
+      hidden,
+      decisionDays:
+        decisionDays === null ? null : Math.round(decisionDays * 10) / 10
     }
   }
 
@@ -81,6 +101,11 @@ export class AdminReviewsService {
 
     return {
       id: review.id,
+      status: statusOf(
+        review.hiddenAt,
+        review.reports.filter(report => report.resolvedAt === null).length
+      ),
+      hiddenAt: review.hiddenAt?.toISOString() ?? null,
       text: review.text,
       game: { igdbId: review.igdbId, name: game?.name ?? null },
       rating: rating?.value ?? null,
@@ -97,6 +122,7 @@ export class AdminReviewsService {
       author: {
         id: review.user.id,
         handle: review.user.userName,
+        admin: review.user.role === 'ADMIN',
         createdAt: review.user.createdAt.toISOString(),
         suspended: review.user.suspendedAt !== null,
         reviews: reviewsTotal,
