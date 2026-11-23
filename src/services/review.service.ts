@@ -44,7 +44,7 @@ export class ReviewService {
       )
       if (!userGame) {
         throw new ClientError(
-          'Adicione o jogo à sua biblioteca para escrever uma resenha.',
+          'Adicione o jogo à sua biblioteca para escrever uma análise.',
           404
         )
       }
@@ -60,7 +60,7 @@ export class ReviewService {
         (statusId === BACKLOG_STATUS_ID && hasExperience)
       if (!canReview) {
         throw new ClientError(
-          'Você só pode escrever uma resenha de um jogo que já começou (Jogado, Jogando, Pausado ou Larguei) ou de um jogo na sua fila com horas ou finalizações registradas.',
+          'Você só pode escrever uma análise de um jogo que já começou (Jogado, Jogando, Pausado ou Larguei) ou de um jogo na sua fila com horas ou finalizações registradas.',
           400
         )
       }
@@ -85,7 +85,7 @@ export class ReviewService {
     await this.requireUser(userId)
 
     const existing = await this.reviewRepository.findByUserGame(igdbId, userId)
-    if (!existing) throw new ClientError('Resenha não encontrada.', 404)
+    if (!existing) throw new ClientError('Análise não encontrada.', 404)
 
     await this.reviewRepository.delete(userId, igdbId)
   }
@@ -98,7 +98,7 @@ export class ReviewService {
   ) {
     if (authorId === reporterId) {
       throw new ClientError(
-        'Você não pode denunciar a sua própria resenha.',
+        'Você não pode denunciar a sua própria análise.',
         403
       )
     }
@@ -106,7 +106,7 @@ export class ReviewService {
     const review = await this.reviewRepository.findByUserGame(igdbId, authorId)
     // Uma review oculta já saiu da página do jogo: quem denuncia não a enxerga mais.
     if (!review || review.hiddenAt) {
-      throw new ClientError('Resenha não encontrada.', 404)
+      throw new ClientError('Análise não encontrada.', 404)
     }
 
     try {
@@ -118,7 +118,7 @@ export class ReviewService {
       })
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new ClientError('Você já denunciou esta resenha.', 409)
+        throw new ClientError('Você já denunciou esta análise.', 409)
       }
       throw error
     }
@@ -131,13 +131,15 @@ export class ReviewService {
   async findCommunityReviews(
     igdbId: number,
     pageIndex: number,
-    limit = this.COMMUNITY_REVIEWS_PER_PAGE
+    limit = this.COMMUNITY_REVIEWS_PER_PAGE,
+    viewerId: string | null = null
   ) {
     const [reviews, total] = await Promise.all([
       this.reviewRepository.findCommunityReviews({
         igdbId,
         skip: pageIndex * limit,
-        take: limit
+        take: limit,
+        viewerId
       }),
       this.reviewRepository.countCommunityReviews(igdbId)
     ])
@@ -153,7 +155,8 @@ export class ReviewService {
         status: r.status,
         endless: r.endless,
         text: r.text,
-        createdAt: r.createdAt
+        createdAt: r.createdAt,
+        reportedByMe: r.reportedByMe
       })),
       total
     }

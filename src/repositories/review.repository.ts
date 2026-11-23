@@ -25,12 +25,21 @@ export class ReviewRepository {
   async findCommunityReviews({
     igdbId,
     skip,
-    take
+    take,
+    viewerId = null
   }: {
     igdbId: number
     skip: number
     take: number
+    viewerId?: string | null
   }): Promise<CommunityReviewRow[]> {
+    const reportedByMe = viewerId
+      ? Prisma.sql`EXISTS (
+          SELECT 1 FROM review_reports rr
+          WHERE rr.review_id = rv.id AND rr.reporter_id = ${viewerId}
+        )`
+      : Prisma.sql`false`
+
     return prisma.$queryRaw<CommunityReviewRow[]>(Prisma.sql`
       SELECT
         rv.user_id                    AS "userId",
@@ -42,7 +51,8 @@ export class ReviewRepository {
         ugs.status::text              AS "status",
         COALESCE(ug.endless, false)   AS "endless",
         rv.text                       AS "text",
-        rv.created_at                 AS "createdAt"
+        rv.created_at                 AS "createdAt",
+        ${reportedByMe}               AS "reportedByMe"
       FROM reviews rv
       JOIN users u ON u.id = rv.user_id
       LEFT JOIN ratings r ON r.igdb_id = rv.igdb_id AND r.user_id = rv.user_id
