@@ -4,6 +4,8 @@ import { EmailContent, renderEmail } from './email-template'
 const DEFAULT_SMTP_HOST = 'smtp.gmail.com'
 const DEFAULT_SMTP_PORT = 465
 const SMTP_TIMEOUT_MS = 10_000
+const BREVO_ENDPOINT = 'https://api.brevo.com/v3/smtp/email'
+const HTTP_TIMEOUT_MS = 10_000
 
 export class EmailService {
   private transporter: Transporter | null = null
@@ -35,7 +37,55 @@ export class EmailService {
     return this.transporter
   }
 
+  private async sendViaBrevo(
+    apiKey: string,
+    to: string,
+    subject: string,
+    content: EmailContent
+  ) {
+    const senderEmail = process.env.MAIL_FROM
+    if (!senderEmail) {
+      throw new Error('MAIL_FROM is required to send email through Brevo.')
+    }
+
+    const { html, text } = renderEmail(content)
+    const response = await fetch(BREVO_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'api-key': apiKey,
+        'content-type': 'application/json',
+        accept: 'application/json'
+      },
+      body: JSON.stringify({
+        sender: {
+          name: process.env.MAIL_FROM_NAME || 'EuZerei',
+          email: senderEmail
+        },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+        textContent: text
+      }),
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS)
+    })
+
+    if (!response.ok) {
+      const detail = (await response.json().catch(() => null)) as {
+        code?: string
+      } | null
+      throw new Error(
+        `Brevo rejected the email (HTTP ${response.status}${detail?.code ? `, ${detail.code}` : ''}).`
+      )
+    }
+  }
+
   private async send(to: string, subject: string, content: EmailContent) {
+    const brevoKey = process.env.BREVO_API_KEY
+    if (brevoKey) {
+      await this.sendViaBrevo(brevoKey, to, subject, content)
+      return
+    }
+
     const transporter = this.getTransporter()
     await transporter.sendMail({
       from: {
