@@ -7,6 +7,7 @@ import { UserRepository } from '../repositories/users.repository'
 import { GameCacheRepository } from '../repositories/game-cache.repository'
 import { GameCacheService } from '../services/game-cache.service'
 import * as ReviewSchema from '../schemas/review.schema'
+import { userRateLimit } from '../utils/user-rate-limit'
 import { ErrorSchemas } from '../schemas/error.schema'
 
 export async function reviewRoutes(app: FastifyInstance) {
@@ -66,6 +67,27 @@ export async function reviewRoutes(app: FastifyInstance) {
       }
     },
     async (request, reply) => reviewController.deleteReview(request, reply)
+  )
+
+  // onRequest (not preHandler): Fastify validates before preHandler, so a
+  // stranger with a bad body would get a 400 instead of a 401.
+  app.withTypeProvider<ZodTypeProvider>().post(
+    '/:igdbId/authors/:authorId/reports',
+    {
+      onRequest: [app.authenticate],
+      config: { rateLimit: userRateLimit('review-report', 10, '1 hour') },
+      schema: {
+        params: ReviewSchema.ReportReviewParamsSchema,
+        body: ReviewSchema.ReportReviewBodySchema,
+        response: {
+          201: ReviewSchema.ReportReviewResponseSchema,
+          400: ErrorSchemas.BadRequest,
+          404: ErrorSchemas.NotFound,
+          500: ErrorSchemas.InternalServerError
+        }
+      }
+    },
+    async (request, reply) => reviewController.reportReview(request, reply)
   )
 
   app.withTypeProvider<ZodTypeProvider>().get(

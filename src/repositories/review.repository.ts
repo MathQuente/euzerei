@@ -1,4 +1,4 @@
-import { Prisma } from '../database/prisma-client'
+import { Prisma, type ReviewReportReason } from '../database/prisma-client'
 import { prisma } from '../database/db'
 import { CommunityReviewRow } from '../types/review'
 
@@ -77,5 +77,14 @@ export class ReviewRepository {
     return prisma.review.delete({
       where: { userId_igdbId: { userId, igdbId } }
     })
+  }
+
+  createReport(data: {
+    reviewId: string
+    reporterId: string
+    reason: ReviewReportReason
+    reviewUpdatedAt: Date
+  }) {
+    return prisma.reviewReport.create({ data, select: { id: true } })
   }
 }

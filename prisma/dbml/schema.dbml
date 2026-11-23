@@ -47,6 +47,8 @@ Table users {
   refreshToken refresh_token [not null]
   Rating ratings [not null]
   Review reviews [not null]
+  reviewReports review_reports [not null]
+  resolvedReviewReports review_reports [not null]
   accounts platform_accounts [not null]
   favoriteGames user_favorite_games [not null]
   auditLogs audit_logs [not null]
@@ -194,9 +196,29 @@ Table reviews {
   text String [not null]
   createdAt DateTime [default: `now()`, not null]
   updatedAt DateTime [not null]
+  reports review_reports [not null]
 
   indexes {
     (userId, igdbId) [unique]
+  }
+}
+
+Table review_reports {
+  id String [pk]
+  review reviews [not null]
+  reviewId String [not null]
+  reporter users
+  reporterId String
+  reason ReviewReportReason [not null]
+  reviewUpdatedAt DateTime [not null]
+  createdAt DateTime [default: `now()`, not null]
+  resolvedAt DateTime
+  resolvedBy users
+  resolvedById String
+  resolution ReviewReportResolution
+
+  indexes {
+    (reviewId, reporterId) [unique]
   }
 }
 
@@ -311,6 +333,19 @@ Enum Status {
   DROPPED
 }
 
+Enum ReviewReportReason {
+  OFFENSE
+  SPAM
+  SPOILER
+  OTHER
+}
+
+Enum ReviewReportResolution {
+  DISMISSED
+  HIDDEN
+  REMOVED
+}
+
 Enum UserRole {
   USER
   ADMIN
@@ -352,6 +387,12 @@ Ref: platform_account_hours.platformAccountId > platform_accounts.id [delete: Ca
 Ref: completion_suggestions.userGameId - user_games.id [delete: Cascade]
 
 Ref: reviews.userId > users.id [delete: Cascade]
+
+Ref: review_reports.reviewId > reviews.id [delete: Cascade]
+
+Ref: review_reports.reporterId > users.id [delete: Set Null]
+
+Ref: review_reports.resolvedById > users.id [delete: Set Null]
 
 Ref: user_game_stats.userGameId - user_games.id [delete: Cascade]
 

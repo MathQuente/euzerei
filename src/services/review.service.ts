@@ -1,5 +1,7 @@
 import { ClientError } from '../errors/client-error'
 import { ReviewRepository } from '../repositories/review.repository'
+import { isUniqueViolation } from '../utils/prisma-errors'
+import type { ReviewReportReason } from '../database/prisma-client'
 import { UserRepository } from '../repositories/users.repository'
 import { GameCacheService } from './game-cache.service'
 import {
@@ -86,6 +88,39 @@ export class ReviewService {
     if (!existing) throw new ClientError('Resenha não encontrada.', 404)
 
     await this.reviewRepository.delete(userId, igdbId)
+  }
+
+  async reportReview(
+    igdbId: number,
+    authorId: string,
+    reporterId: string,
+    reason: ReviewReportReason
+  ) {
+    if (authorId === reporterId) {
+      throw new ClientError(
+        'Você não pode denunciar a sua própria resenha.',
+        403
+      )
+    }
+
+    const review = await this.reviewRepository.findByUserGame(igdbId, authorId)
+    if (!review) throw new ClientError('Resenha não encontrada.', 404)
+
+    try {
+      await this.reviewRepository.createReport({
+        reviewId: review.id,
+        reporterId,
+        reason,
+        reviewUpdatedAt: review.updatedAt
+      })
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new ClientError('Você já denunciou esta resenha.', 409)
+      }
+      throw error
+    }
+
+    return { reported: true as const }
   }
 
   private readonly COMMUNITY_REVIEWS_PER_PAGE = 10
