@@ -39,30 +39,32 @@ model Rating {
 }
 
 model User {
-  id              String         @id @default(uuid())
-  email           String         @unique
-  userName        String         @unique @map("user_name")
-  password        String
-  hasPassword     Boolean        @default(true) @map("has_password")
-  profilePicture  String?        @map("profile_picture")
-  userBanner      String?        @map("user_banner")
-  googleId        String?        @unique @map("google_id")
-  discordId       String?        @unique @map("discord_id")
-  emailVerifiedAt DateTime?      @map("email_verified_at")
-  termsAcceptedAt DateTime?      @map("terms_accepted_at")
-  termsVersion    String?        @map("terms_version")
-  role            UserRole       @default(USER)
-  suspendedAt     DateTime?      @map("suspended_at")
-  createdAt       DateTime       @default(now()) @map("created_at")
-  updatedAt       DateTime       @default(now()) @map("updated_at")
-  userGames       UserGame[]
-  refreshToken    RefreshToken[]
-  Rating          Rating[]
-  Review          Review[]
-  accounts        PlatformAccount[]
-  favoriteGames   UserFavoriteGame[]
-  auditLogs       AuditLog[]
-  settingsEdits   AppSetting[]
+  id                    String             @id @default(uuid())
+  email                 String             @unique
+  userName              String             @unique @map("user_name")
+  password              String
+  hasPassword           Boolean            @default(true) @map("has_password")
+  profilePicture        String?            @map("profile_picture")
+  userBanner            String?            @map("user_banner")
+  googleId              String?            @unique @map("google_id")
+  discordId             String?            @unique @map("discord_id")
+  emailVerifiedAt       DateTime?          @map("email_verified_at")
+  termsAcceptedAt       DateTime?          @map("terms_accepted_at")
+  termsVersion          String?            @map("terms_version")
+  role                  UserRole           @default(USER)
+  suspendedAt           DateTime?          @map("suspended_at")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @default(now()) @map("updated_at")
+  userGames             UserGame[]
+  refreshToken          RefreshToken[]
+  Rating                Rating[]
+  Review                Review[]
+  reviewReports         ReviewReport[]     @relation("ReviewReporter")
+  resolvedReviewReports ReviewReport[]     @relation("ReviewReportResolver")
+  accounts              PlatformAccount[]
+  favoriteGames         UserFavoriteGame[]
+  auditLogs             AuditLog[]
+  settingsEdits         AppSetting[]
 
   following Follow[] @relation("FollowFollower")
   followers Follow[] @relation("FollowFollowing")
@@ -84,25 +86,25 @@ model Follow {
 }
 
 model UserGame {
-  id                String    @id @default(uuid())
-  igdbId            Int       @map("igdb_id")
-  userId            String    @map("user_id")
-  userGamesStatusId Int       @map("user_games_status_id")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
-  completedAt       DateTime? @map("completed_at")
+  id                   String    @id @default(uuid())
+  igdbId               Int       @map("igdb_id")
+  userId               String    @map("user_id")
+  userGamesStatusId    Int       @map("user_games_status_id")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  completedAt          DateTime? @map("completed_at")
   // Última vez que o jogo entrou em Larguei. Nunca é apagada e só vale enquanto
   // o status for Larguei (ver droppedAtFor).
-  droppedAt         DateTime? @map("dropped_at")
-  lastPlayedAt      DateTime? @map("last_played_at")
-  endless           Boolean   @default(false)
-  endlessLocked     Boolean   @default(false) @map("endless_locked")
-  hundredPercent    Boolean   @default(false) @map("hundred_percent")
-  hundredPercentLocked Boolean @default(false) @map("hundred_percent_locked")
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  droppedAt            DateTime? @map("dropped_at")
+  lastPlayedAt         DateTime? @map("last_played_at")
+  endless              Boolean   @default(false)
+  endlessLocked        Boolean   @default(false) @map("endless_locked")
+  hundredPercent       Boolean   @default(false) @map("hundred_percent")
+  hundredPercentLocked Boolean   @default(false) @map("hundred_percent_locked")
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   UserGameStats   UserGameStats?
-  UserGamesStatus UserGamesStatus    @relation(fields: [userGamesStatusId], references: [id])
+  UserGamesStatus UserGamesStatus       @relation(fields: [userGamesStatusId], references: [id])
   platforms       UserGamePlatform[]
   suggestion      CompletionSuggestion?
 
@@ -173,7 +175,7 @@ model UserGamePlatform {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  userGame     UserGame           @relation(fields: [userGameId], references: [id], onDelete: Cascade)
+  userGame     UserGame               @relation(fields: [userGameId], references: [id], onDelete: Cascade)
   accountHours PlatformAccountHours[]
 
   @@unique([userGameId, platform, console])
@@ -297,9 +299,44 @@ model Review {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  reports ReviewReport[]
+
   @@unique([userId, igdbId])
   @@index([igdbId])
   @@map("reviews")
+}
+
+enum ReviewReportReason {
+  OFFENSE
+  SPAM
+  SPOILER
+  OTHER
+}
+
+enum ReviewReportResolution {
+  DISMISSED
+  HIDDEN
+  REMOVED
+}
+
+model ReviewReport {
+  id              String                  @id @default(uuid())
+  review          Review                  @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  reviewId        String                  @map("review_id")
+  reporter        User?                   @relation("ReviewReporter", fields: [reporterId], references: [id], onDelete: SetNull)
+  reporterId      String?                 @map("reporter_id")
+  reason          ReviewReportReason
+  reviewUpdatedAt DateTime                @map("review_updated_at")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  resolvedAt      DateTime?               @map("resolved_at")
+  resolvedBy      User?                   @relation("ReviewReportResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedById    String?                 @map("resolved_by")
+  resolution      ReviewReportResolution?
+
+  @@unique([reviewId, reporterId])
+  @@index([resolvedAt, createdAt])
+  @@index([reporterId])
+  @@map("review_reports")
 }
 
 model UserGameStats {

@@ -47,3 +47,23 @@ export const GetCommunityReviewsResponseSchema = z.object({
   reviews: z.array(CommunityReviewSchema),
   total: z.number()
 })
+
+export const REVIEW_REPORT_REASONS = [
+  'OFFENSE',
+  'SPAM',
+  'SPOILER',
+  'OTHER'
+] as const
+
+export const ReportReviewParamsSchema = z.object({
+  igdbId: z.coerce.number().int(),
+  authorId: z.uuid()
+})
+
+export const ReportReviewBodySchema = z.object({
+  reason: z.enum(REVIEW_REPORT_REASONS)
+})
+
+export const ReportReviewResponseSchema = z.object({
+  reported: z.literal(true)
+})

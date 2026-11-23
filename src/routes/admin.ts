@@ -7,6 +7,7 @@ import { adminUsersRoutes } from './admin-users'
 import { adminCatalogRoutes } from './admin-catalog'
 import { adminOverviewRoutes } from './admin-overview'
 import { adminSecurityRoutes } from './admin-security'
+import { adminReviewsRoutes } from './admin-reviews'
 import { adminHealthRoutes } from './admin-health'
 import { adminImportsRoutes, adminQueuesRoutes } from './admin-imports'
 
@@ -29,5 +30,6 @@ export async function adminRoutes(app: FastifyInstance) {
   app.register(adminImportsRoutes, { prefix: '/imports' })
   app.register(adminQueuesRoutes, { prefix: '/queues' })
   app.register(adminUsersRoutes, { prefix: '/users' })
+  app.register(adminReviewsRoutes, { prefix: '/reviews' })
   app.register(adminSettingsRoutes, { prefix: '/settings' })
 }

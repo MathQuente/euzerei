@@ -37,6 +37,22 @@ export class ReviewController {
     return reply.status(204).send()
   }
 
+  async reportReview(request: FastifyRequest, reply: FastifyReply) {
+    const { igdbId, authorId } = ReviewSchema.ReportReviewParamsSchema.parse(
+      request.params
+    )
+    const { reason } = ReviewSchema.ReportReviewBodySchema.parse(request.body)
+
+    const result = await this.reviewService.reportReview(
+      igdbId,
+      authorId,
+      request.user.userId,
+      reason
+    )
+
+    return reply.status(201).send(result)
+  }
+
   async getCommunityReviews(request: FastifyRequest, reply: FastifyReply) {
     const { igdbId } = ReviewSchema.ReviewParamsSchema.parse(request.params)
     const { pageIndex, limit } =
