@@ -21,3 +21,8 @@ export const BACKFILL_ACTIONS = [
   'Rodou o backfill de slugs',
   'Rodou o backfill de hypes e notas'
 ] as const
+
+export const HIDE_REVIEW_ACTION = 'Ocultou uma review'
+export const RESTORE_REVIEW_ACTION = 'Reexibiu uma review'
+export const DISMISS_REVIEW_ACTION = 'Manteve uma review'
+export const REMOVE_REVIEW_ACTION = 'Removeu uma review'
