@@ -249,6 +249,38 @@ describe('AuthController provider callbacks', () => {
     )
   })
 
+  it('discord: 429 na troca de token volta ao app com error=rate_limited', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('rate limited', {
+          status: 429,
+          headers: { 'retry-after': '5' }
+        })
+      )
+    )
+    const controller = new AuthController({} as unknown as AuthService)
+    const r = reply()
+    const req = {
+      query: { code: 'c' },
+      server: {
+        discordOAuth2: {
+          getAccessTokenFromAuthorizationCodeFlow: vi
+            .fn()
+            .mockRejectedValue(new Error('boom'))
+        }
+      }
+    } as unknown as FastifyRequest
+
+    await controller.discordCallback(req, r, { acceptedTerms: false })
+
+    expect(r.redirect).toHaveBeenCalledWith(
+      'http://localhost:5173/auth?error=rate_limited'
+    )
+    vi.unstubAllGlobals()
+  })
+
   it.each(['google', 'discord'] as const)(
     '%s: conta suspensa volta ao app com error=account_suspended, não email_not_verified',
     async provider => {
