@@ -40,7 +40,8 @@ const CommunityReviewSchema = z.object({
     .nullable(),
   endless: z.boolean(),
   text: z.string(),
-  createdAt: z.date()
+  createdAt: z.date(),
+  reportedByMe: z.boolean()
 })
 
 export const GetCommunityReviewsResponseSchema = z.object({

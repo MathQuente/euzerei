@@ -12,4 +12,5 @@ export type CommunityReviewRow = {
   endless: boolean
   text: string
   createdAt: Date
+  reportedByMe: boolean
 }

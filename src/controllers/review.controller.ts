@@ -58,12 +58,16 @@ export class ReviewController {
     const { pageIndex, limit } =
       ReviewSchema.CommunityReviewsQueryStringSchema.parse(request.query)
 
+    const viewerId =
+      (request.user as { userId?: string } | undefined)?.userId ?? null
+
     const { reviews, total } = await this.reviewService.findCommunityReviews(
       igdbId,
       pageIndex,
-      limit
+      limit,
+      viewerId
     )
 
-    return reply.status(200).send({ reviews, total })
+    return reply.header('Vary', 'Cookie').status(200).send({ reviews, total })
   }
 }

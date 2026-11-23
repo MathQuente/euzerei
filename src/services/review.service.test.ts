@@ -41,7 +41,7 @@ function libraryEntry(
 }
 
 const STATUS_ERROR =
-  'Você só pode escrever uma resenha de um jogo que já começou (Jogado, Jogando, Pausado ou Larguei) ou de um jogo na sua fila com horas ou finalizações registradas.'
+  'Você só pode escrever uma análise de um jogo que já começou (Jogado, Jogando, Pausado ou Larguei) ou de um jogo na sua fila com horas ou finalizações registradas.'
 
 function buildService({
   userGame,
@@ -77,7 +77,7 @@ describe('ReviewService.upsertReview', () => {
       service.upsertReview(11133, 'user-1', 'texto')
     ).rejects.toMatchObject({
       statusCode: 404,
-      message: 'Adicione o jogo à sua biblioteca para escrever uma resenha.'
+      message: 'Adicione o jogo à sua biblioteca para escrever uma análise.'
     })
   })
 
@@ -211,6 +211,65 @@ describe('ReviewService.findCommunityReviews', () => {
 
     expect(reviews[0]).toMatchObject({ status: 'PLAYING', endless: true })
     expect(reviews[1]).toMatchObject({ status: null, endless: false })
+  })
+
+  it('passes the viewer to the repository and keeps reportedByMe per row', async () => {
+    const base = {
+      userName: 'a',
+      profilePicture: null,
+      rating: null,
+      hoursPlayed: 0,
+      completions: 0,
+      status: null,
+      endless: false,
+      text: 'texto',
+      createdAt: new Date('2026-01-01')
+    }
+    const findCommunityReviews = vi.fn().mockResolvedValue([
+      { ...base, userId: 'u1', reportedByMe: true },
+      { ...base, userId: 'u2', reportedByMe: false }
+    ])
+    const service = new ReviewService(
+      fakeReviewRepository({
+        findCommunityReviews,
+        countCommunityReviews: vi.fn().mockResolvedValue(2)
+      }),
+      fakeUserRepository(),
+      fakeGameCacheService()
+    )
+
+    const { reviews } = await service.findCommunityReviews(
+      11133,
+      2,
+      5,
+      'viewer-1'
+    )
+
+    expect(findCommunityReviews).toHaveBeenCalledWith({
+      igdbId: 11133,
+      skip: 10,
+      take: 5,
+      viewerId: 'viewer-1'
+    })
+    expect(reviews.map(r => r.reportedByMe)).toEqual([true, false])
+  })
+
+  it('asks the repository with no viewer for a stranger', async () => {
+    const findCommunityReviews = vi.fn().mockResolvedValue([])
+    const service = new ReviewService(
+      fakeReviewRepository({
+        findCommunityReviews,
+        countCommunityReviews: vi.fn().mockResolvedValue(0)
+      }),
+      fakeUserRepository(),
+      fakeGameCacheService()
+    )
+
+    await service.findCommunityReviews(11133, 0)
+
+    expect(findCommunityReviews).toHaveBeenCalledWith(
+      expect.objectContaining({ viewerId: null })
+    )
   })
 })
 

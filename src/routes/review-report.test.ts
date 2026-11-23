@@ -54,6 +54,7 @@ async function buildApp(signedIn: boolean) {
     if (!signedIn) return reply.status(401).send({ status: 'unauthorized' })
     ;(request as { user?: unknown }).user = { userId: 'reporter-1' }
   })
+  app.decorate('tryAuthenticate', async () => undefined)
   await app.register(fastifyRateLimit, { max: 300, timeWindow: '1 minute' })
   await app.register(reviewRoutes, { prefix: '/reviews' })
   await app.ready()
@@ -183,5 +184,23 @@ describe('POST /reviews/:igdbId/authors/:authorId/reports', () => {
     expect(codes.slice(0, 10).every(code => code === 201)).toBe(true)
     expect(codes[10]).toBe(429)
     expect(reviewService.reportReview).toHaveBeenCalledTimes(10)
+  })
+
+  it('tells the client when to retry: the 429 carries Retry-After in seconds', async () => {
+    app = await buildApp(true)
+    let last: Awaited<ReturnType<typeof app.inject>> | undefined
+    for (let i = 0; i < 11; i++) {
+      last = await app.inject({
+        method: 'POST',
+        url: URL,
+        payload: { reason: 'SPAM' }
+      })
+    }
+
+    expect(last?.statusCode).toBe(429)
+    const retryAfter = Number(last?.headers['retry-after'])
+    expect(Number.isInteger(retryAfter)).toBe(true)
+    expect(retryAfter).toBeGreaterThan(0)
+    expect(retryAfter).toBeLessThanOrEqual(3600)
   })
 })

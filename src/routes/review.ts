@@ -93,6 +93,7 @@ export async function reviewRoutes(app: FastifyInstance) {
   app.withTypeProvider<ZodTypeProvider>().get(
     '/:igdbId/community',
     {
+      preHandler: [app.tryAuthenticate],
       schema: {
         params: ReviewSchema.ReviewParamsSchema,
         querystring: ReviewSchema.CommunityReviewsQueryStringSchema,
