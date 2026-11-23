@@ -30,6 +30,7 @@ import { HealthRepository } from './repositories/health.repository'
 import { healthRoutes } from './routes/health'
 import { registerOriginGuard } from './origin-guard'
 import { shutdown } from './shutdown'
+import { getAdminCatalogRunService } from './routes/admin-catalog'
 import { sendProblem } from './utils/problem'
 import { isSessionBound } from './utils/session-bound'
 
@@ -96,6 +97,7 @@ export class Server {
       async ({ err }) => {
         if (err) console.error('Shutting down after error:', err)
         await shutdown({
+          before: [() => getAdminCatalogRunService().stopAll()],
           app: this.app,
           workers,
           connections: [

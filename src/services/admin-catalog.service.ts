@@ -61,6 +61,11 @@ export class AdminCatalogService {
     }
   }
 
+  /** Depois de uma execução o resumo e a lista de jobs são relidos do banco, não do cache de 60 s. */
+  invalidate() {
+    this.cached.clear()
+  }
+
   jobs(now: Date = new Date()) {
     return this.cached('jobs', () =>
       withReadLimit(() => this.buildJobs(now), UNAVAILABLE)

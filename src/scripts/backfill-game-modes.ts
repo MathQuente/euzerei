@@ -38,12 +38,13 @@ async function main() {
   const repo = new GameCacheRepository()
 
   const force = process.argv.includes('--force')
+  const dryRun = process.argv.includes('--dry-run')
   let lastId = parseFromArg()
   let totalUpdated = 0
   let round = 0
 
   console.log(
-    `Backfilling game_modes for ${force ? 'all' : 'unchecked'} cached games with igdb_id > ${lastId}...`
+    `${dryRun ? '[dry run] ' : ''}Backfilling game_modes for ${force ? 'all' : 'unchecked'} cached games with igdb_id > ${lastId}...`
   )
   console.log(
     'Press Ctrl+C to stop, then resume with: npm run backfill:game-modes -- --from <Last ID>\n'
@@ -60,6 +61,16 @@ async function main() {
     if (igdbIds.length === 0) {
       console.log('\nBackfill complete — no more cached games.')
       break
+    }
+
+    if (dryRun) {
+      // Só conta: não consulta o IGDB e não grava nada.
+      lastId = igdbIds[igdbIds.length - 1]
+      totalUpdated += igdbIds.length
+      process.stdout.write(
+        `\r[dry run] Round ${round} | ${totalUpdated} games would be processed | Last ID: ${lastId}`
+      )
+      continue
     }
 
     const chunks: number[][] = []
@@ -91,7 +102,9 @@ async function main() {
     if (elapsed < MIN_ROUND_MS) await sleep(MIN_ROUND_MS - elapsed)
   }
 
-  console.log(`\nDone. Total updated this run: ${totalUpdated}`)
+  console.log(
+    `\nDone.${dryRun ? ' [dry run] Nothing was queried or written; would process' : ' Total updated this run:'} ${totalUpdated}`
+  )
   await prisma.$disconnect()
 }
 

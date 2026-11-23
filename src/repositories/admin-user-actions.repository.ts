@@ -17,6 +17,7 @@ export class AdminUserActionsRepository {
         userName: true,
         role: true,
         suspendedAt: true,
+        emailVerifiedAt: true,
         profilePicture: true,
         userBanner: true
       }

@@ -993,6 +993,10 @@ export class GameCacheRepository {
     return prisma.gameCache.count()
   }
 
+  countMissingHypes(): Promise<number> {
+    return prisma.gameCache.count({ where: { hypes: null } })
+  }
+
   async findManyMissingHypes(limit: number): Promise<number[]> {
     const rows = await prisma.gameCache.findMany({
       where: { hypes: null },

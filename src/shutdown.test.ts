@@ -19,6 +19,28 @@ describe('shutdown', () => {
     expect(order.slice(3).sort()).toEqual(['database', 'redis'])
   })
 
+  it('runs the "before" steps first, even if one of them fails', async () => {
+    const order: string[] = []
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await shutdown({
+      before: [
+        async () => {
+          throw new Error('kill failed')
+        },
+        async () => {
+          order.push('before')
+        }
+      ],
+      app: { close: async () => void order.push('app') },
+      workers: [],
+      connections: [async () => void order.push('database')]
+    })
+
+    expect(order).toEqual(['before', 'app', 'database'])
+    errors.mockRestore()
+  })
+
   it('waits for a running worker before closing the connections', async () => {
     const order: string[] = []
     let finishJob!: () => void

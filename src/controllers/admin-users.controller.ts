@@ -4,13 +4,15 @@ import {
   AdminUserParamsSchema,
   AdminUsersListQuerySchema
 } from '../schemas/admin-users.schema'
+import { AdminUserEmailsService } from '../services/admin-user-emails.service'
 import { AdminUserActionsService } from '../services/admin-user-actions.service'
 import { AdminUsersService } from '../services/admin-users.service'
 
 export class AdminUsersController {
   constructor(
     private adminUsersService: AdminUsersService,
-    private actions: AdminUserActionsService
+    private actions: AdminUserActionsService,
+    private emails: AdminUserEmailsService
   ) {}
 
   async list(request: FastifyRequest, reply: FastifyReply) {
@@ -48,6 +50,20 @@ export class AdminUsersController {
     return reply.send(
       await this.actions.deleteAccount(id, handle, this.actor(request))
     )
+  }
+
+  async resendVerification(request: FastifyRequest, reply: FastifyReply) {
+    const { id } = AdminUserParamsSchema.parse(request.params)
+
+    return reply.send(
+      await this.emails.resendVerification(id, this.actor(request))
+    )
+  }
+
+  async resetPassword(request: FastifyRequest, reply: FastifyReply) {
+    const { id } = AdminUserParamsSchema.parse(request.params)
+
+    return reply.send(await this.emails.resetPassword(id, this.actor(request)))
   }
 
   private actor(request: FastifyRequest) {

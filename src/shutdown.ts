@@ -4,6 +4,8 @@ type ShutdownTargets = {
   app: Closable
   workers: Closable[]
   connections: Array<() => Promise<unknown>>
+  /** Antes de fechar a API e as conexões (ex.: matar o filho do catálogo e fechar a auditoria dele). */
+  before?: Array<() => Promise<unknown>>
 }
 
 async function settle(label: string, steps: Array<() => Promise<unknown>>) {
@@ -18,7 +20,13 @@ async function settle(label: string, steps: Array<() => Promise<unknown>>) {
   }
 }
 
-export async function shutdown({ app, workers, connections }: ShutdownTargets) {
+export async function shutdown({
+  app,
+  workers,
+  connections,
+  before = []
+}: ShutdownTargets) {
+  await settle('before', before)
   await settle('app', [() => app.close()])
   await settle(
     'workers',

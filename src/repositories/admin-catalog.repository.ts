@@ -172,7 +172,7 @@ export class AdminCatalogRepository implements CatalogStore {
   async lastRuns(actions: string[]): Promise<Map<string, Date>> {
     const rows = await prisma.auditLog.groupBy({
       by: ['action'],
-      where: { action: { in: actions } },
+      where: { action: { in: actions }, result: 'OK' },
       _max: { createdAt: true }
     })
     const runs = new Map<string, Date>()
