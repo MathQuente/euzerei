@@ -41,6 +41,7 @@ Table users {
   termsVersion String
   role UserRole [not null, default: 'USER']
   suspendedAt DateTime
+  lastSeenAt DateTime
   createdAt DateTime [default: `now()`, not null]
   updatedAt DateTime [default: `now()`, not null]
   userGames user_games [not null]

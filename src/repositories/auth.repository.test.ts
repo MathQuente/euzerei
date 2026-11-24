@@ -36,6 +36,16 @@ describe('AuthRepository.rotateToken', () => {
     )
   })
 
+  it('stamps last_seen_at in the same statement that locks the user row', async () => {
+    tx.refreshToken.updateMany.mockResolvedValue({ count: 1 })
+
+    await new AuthRepository().rotateToken('old', 'new', 'user-1', new Date())
+
+    const sql = (tx.$queryRaw.mock.calls[0][0] as string[]).join('?')
+    expect(sql).toContain('UPDATE users SET last_seen_at')
+    expect(sql).not.toContain('updated_at')
+  })
+
   it('answers 401 when the old token was already revoked or purged', async () => {
     tx.refreshToken.updateMany.mockResolvedValue({ count: 0 })
 

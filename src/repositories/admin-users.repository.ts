@@ -18,6 +18,7 @@ export class AdminUsersRepository {
           emailVerifiedAt: true,
           role: true,
           suspendedAt: true,
+          lastSeenAt: true,
           termsVersion: true,
           createdAt: true,
           _count: { select: { userGames: true } },
@@ -31,20 +32,6 @@ export class AdminUsersRepository {
     return prisma.user.count({
       where: buildAdminUsersWhere({ filter: 'noTerms' })
     })
-  }
-
-  async lastSeen(userIds: string[]): Promise<Map<string, Date>> {
-    if (userIds.length === 0) return new Map()
-    const rows = await prisma.refreshToken.groupBy({
-      by: ['userId'],
-      where: { userId: { in: userIds } },
-      _max: { createdAt: true }
-    })
-    return new Map(
-      rows.flatMap(row =>
-        row._max.createdAt ? [[row.userId, row._max.createdAt] as const] : []
-      )
-    )
   }
 
   summaryCounts(activeSince: Date) {
@@ -67,6 +54,7 @@ export class AdminUsersRepository {
           emailVerifiedAt: true,
           role: true,
           suspendedAt: true,
+          lastSeenAt: true,
           hasPassword: true,
           googleId: true,
           discordId: true,
@@ -98,10 +86,6 @@ export class AdminUsersRepository {
           createdAt: true,
           statsSyncedAt: true
         }
-      }),
-      prisma.refreshToken.aggregate({
-        where: { userId },
-        _max: { createdAt: true }
       })
     ])
   }

@@ -6,7 +6,6 @@ import type { AdminUsersRepository } from '../repositories/admin-users.repositor
 
 const repository = {
   findPage: vi.fn(),
-  lastSeen: vi.fn(),
   summaryCounts: vi.fn(),
   findDetail: vi.fn()
 }
@@ -32,6 +31,7 @@ function pageUser(overrides: Record<string, unknown> = {}) {
     emailVerifiedAt: new Date('2026-09-02T10:00:00Z'),
     role: 'USER',
     termsVersion: TERMS_VERSION,
+    lastSeenAt: null,
     createdAt: new Date('2026-09-02T10:00:00Z'),
     _count: { userGames: 134 },
     accounts: [
@@ -56,6 +56,7 @@ function detailRows(overrides: Record<string, unknown> = {}) {
       discordId: null,
       termsAcceptedAt: null,
       termsVersion: null,
+      lastSeenAt: new Date('2026-11-20T13:00:00Z'),
       createdAt: new Date('2026-09-02T10:00:00Z'),
       ...overrides
     },
@@ -77,14 +78,12 @@ function detailRows(overrides: Record<string, unknown> = {}) {
         createdAt: new Date('2026-09-03T10:00:00Z'),
         statsSyncedAt: null
       }
-    ],
-    { _max: { createdAt: new Date('2026-11-20T13:00:00Z') } }
+    ]
   ]
 }
 
 beforeEach(() => {
   repository.findPage.mockReset().mockResolvedValue([0, []])
-  repository.lastSeen.mockReset().mockResolvedValue(new Map())
   repository.summaryCounts.mockReset().mockResolvedValue([72, 4])
   repository.findDetail.mockReset().mockResolvedValue(detailRows())
 })
@@ -103,11 +102,15 @@ describe('AdminUsersService.list', () => {
   it('maps a row without leaking anything sensitive', async () => {
     repository.findPage.mockResolvedValue([
       1,
-      [pageUser({ password: 'hash', googleId: 'g', discordId: 'd' })]
+      [
+        pageUser({
+          password: 'hash',
+          googleId: 'g',
+          discordId: 'd',
+          lastSeenAt: new Date('2026-11-20T13:00:00Z')
+        })
+      ]
     ])
-    repository.lastSeen.mockResolvedValue(
-      new Map([['u1', new Date('2026-11-20T13:00:00Z')]])
-    )
 
     const result = await service.list({ filter: 'all', page: 1 })
 
@@ -157,12 +160,6 @@ describe('AdminUsersService.list', () => {
 
     expect(result).toMatchObject({ items: [], total: 41, page: 9999 })
   })
-
-  it('does not look for sessions when the page is empty', async () => {
-    await service.list({ filter: 'all', page: 1 })
-
-    expect(repository.lastSeen).toHaveBeenCalledWith([])
-  })
 })
 
 describe('AdminUsersService.summary', () => {
@@ -178,7 +175,7 @@ describe('AdminUsersService.summary', () => {
 
 describe('AdminUsersService.detail', () => {
   it('answers 404 for an unknown user', async () => {
-    repository.findDetail.mockResolvedValue([null, [], [], {}, 0, [], {}])
+    repository.findDetail.mockResolvedValue([null, [], [], {}, 0, []])
 
     await expect(service.detail('nope', NOW)).rejects.toMatchObject({
       statusCode: 404
