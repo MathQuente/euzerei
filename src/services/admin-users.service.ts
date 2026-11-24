@@ -19,7 +19,7 @@ const LIBRARY_KEYS = [
   'DROPPED'
 ] as const
 
-function toItem(user: PageUser, lastSeen: Map<string, Date>) {
+function toItem(user: PageUser) {
   return {
     id: user.id,
     handle: user.userName,
@@ -31,7 +31,7 @@ function toItem(user: PageUser, lastSeen: Map<string, Date>) {
       ...new Set(user.accounts.map(account => account.platform.toLowerCase()))
     ].sort(),
     games: user._count.userGames,
-    lastSeenAt: lastSeen.get(user.id)?.toISOString() ?? null,
+    lastSeenAt: user.lastSeenAt?.toISOString() ?? null,
     termsAccepted: user.termsVersion === TERMS_VERSION
   }
 }
@@ -49,10 +49,9 @@ export class AdminUsersService {
       (query.page - 1) * ADMIN_USERS_PAGE_SIZE,
       ADMIN_USERS_PAGE_SIZE
     )
-    const lastSeen = await this.repository.lastSeen(users.map(u => u.id))
 
     return {
-      items: users.map(user => toItem(user, lastSeen)),
+      items: users.map(user => toItem(user)),
       page: query.page,
       pageSize: ADMIN_USERS_PAGE_SIZE,
       total
@@ -67,15 +66,8 @@ export class AdminUsersService {
   }
 
   async detail(userId: string, now: Date = new Date()) {
-    const [
-      user,
-      byStatus,
-      statuses,
-      hours,
-      activeSessions,
-      accounts,
-      lastSeen
-    ] = await this.repository.findDetail(userId, now)
+    const [user, byStatus, statuses, hours, activeSessions, accounts] =
+      await this.repository.findDetail(userId, now)
 
     if (!user) throw new ClientError('Usuário não encontrado.', 404)
 
@@ -100,7 +92,7 @@ export class AdminUsersService {
       suspendedAt: user.suspendedAt?.toISOString() ?? null,
       createdAt: user.createdAt.toISOString(),
       emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
-      lastSeenAt: lastSeen._max.createdAt?.toISOString() ?? null,
+      lastSeenAt: user.lastSeenAt?.toISOString() ?? null,
       login: {
         hasPassword: user.hasPassword,
         hasGoogle: user.googleId !== null,

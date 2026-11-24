@@ -74,13 +74,16 @@ export class AuthRepository {
   }
 
   /**
-   * Trava a linha do usuário e recusa se ele foi suspenso. A suspensão faz
-   * UPDATE (lock exclusivo), então não corre junto com a emissão de sessão.
+   * Trava a linha do usuário, grava o último acesso e recusa se ele foi suspenso.
+   * A suspensão faz UPDATE (lock exclusivo), então não corre junto com a emissão de
+   * sessão. Um UPDATE (e não FOR SHARE + UPDATE) evita deadlock entre duas sessões
+   * do mesmo usuário que tentariam subir o lock ao mesmo tempo. Se a emissão falhar
+   * depois, a transação desfaz o carimbo. `updated_at` não é tocado.
    */
   private async lockActiveUser(tx: Prisma.TransactionClient, userId: string) {
     const rows = await tx.$queryRaw<
       { suspended_at: Date | null }[]
-    >`SELECT suspended_at FROM users WHERE id = ${userId} FOR SHARE`
+    >`UPDATE users SET last_seen_at = now() WHERE id = ${userId} RETURNING suspended_at`
     if (rows[0]?.suspended_at) {
       throw new ClientError('Sessão inválida ou expirada.', 401)
     }

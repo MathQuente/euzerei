@@ -21,6 +21,7 @@ model RefreshToken {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("refresh_token")
 }
 
@@ -53,6 +54,7 @@ model User {
   termsVersion          String?            @map("terms_version")
   role                  UserRole           @default(USER)
   suspendedAt           DateTime?          @map("suspended_at")
+  lastSeenAt            DateTime?          @map("last_seen_at")
   createdAt             DateTime           @default(now()) @map("created_at")
   updatedAt             DateTime           @default(now()) @map("updated_at")
   userGames             UserGame[]
