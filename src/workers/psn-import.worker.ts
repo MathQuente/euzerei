@@ -1,6 +1,7 @@
 import { Worker } from 'bullmq'
 import { bullConnection } from '../queues/connection'
 import { IMPORT_WORKER_TUNING } from './worker-tuning'
+import { attachRunRecorder } from './import-run-recorder'
 import {
   PSN_IMPORT_QUEUE_NAME,
   PsnImportJobData
@@ -64,6 +65,8 @@ export function startPsnImportWorker() {
       error: err.message
     })
   })
+
+  attachRunRecorder(worker, 'psn')
 
   return worker
 }

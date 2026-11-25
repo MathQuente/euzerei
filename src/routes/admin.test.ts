@@ -7,6 +7,7 @@ const auditQueryService = vi.hoisted(() => ({
   list: vi.fn(),
   summary: vi.fn()
 }))
+const adminImportRunsService = vi.hoisted(() => ({ summary: vi.fn() }))
 const adminImportsService = vi.hoisted(() => ({
   retryFailedJob: vi.fn(),
   discardFailedJob: vi.fn(),
@@ -76,6 +77,11 @@ vi.mock('../services/audit-query.service', () => ({
 vi.mock('../queues/import-queues', () => ({
   importQueues: {},
   importQueuesRedis: {}
+}))
+vi.mock('../services/admin-import-runs.service', () => ({
+  AdminImportRunsService: class {
+    summary = adminImportRunsService.summary
+  }
 }))
 vi.mock('../services/admin-imports.service', () => ({
   AdminImportsService: class {
@@ -222,6 +228,7 @@ beforeEach(() => {
   adminCatalogService.overviewCatalog
     .mockReset()
     .mockResolvedValue({ total: 0 })
+  adminImportRunsService.summary.mockReset().mockResolvedValue({ total: 0 })
   adminOverviewService.metrics.mockReset().mockResolvedValue({ users: null })
   adminOverviewService.catalog.mockReset().mockResolvedValue({ total: 0 })
   adminCatalogRun.start
@@ -1937,5 +1944,68 @@ describe('e-mails em /admin/users', () => {
 
     expect(response.statusCode).toBe(500)
     expect(response.body).not.toContain('pass')
+  })
+})
+
+describe('GET /admin/imports/runs/summary', () => {
+  const URL = '/admin/imports/runs/summary'
+
+  it('answers 401 for a stranger, even with a bad query, and never reaches the service', async () => {
+    const app = await buildApp(denyAll)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `${URL}?days=banana`
+    })
+
+    expect(response.statusCode).toBe(401)
+    expect(adminImportRunsService.summary).not.toHaveBeenCalled()
+  })
+
+  it('asks for 7 days by default and hands the service result over', async () => {
+    const app = await buildApp(allowAdmin)
+    adminImportRunsService.summary.mockResolvedValue({ marker: 'ok' })
+
+    const response = await app.inject({ method: 'GET', url: URL })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({ marker: 'ok' })
+    expect(adminImportRunsService.summary).toHaveBeenCalledWith(7)
+  })
+
+  it('accepts 30 days', async () => {
+    const app = await buildApp(allowAdmin)
+
+    await app.inject({ method: 'GET', url: `${URL}?days=30` })
+
+    expect(adminImportRunsService.summary).toHaveBeenCalledWith(30)
+  })
+
+  it.each(['1', '90', 'banana', '7.5', '-7'])(
+    'days=%s is a 400 that never reaches the service',
+    async days => {
+      const app = await buildApp(allowAdmin)
+
+      const response = await app.inject({
+        method: 'GET',
+        url: `${URL}?days=${days}`
+      })
+
+      expect(response.statusCode).toBe(400)
+      expect(adminImportRunsService.summary).not.toHaveBeenCalled()
+    }
+  )
+
+  it('a failure is a 500 with the generic message, no internals', async () => {
+    const app = await buildApp(allowAdmin)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    adminImportRunsService.summary.mockRejectedValue(
+      new Error('relation "import_runs" does not exist')
+    )
+
+    const response = await app.inject({ method: 'GET', url: URL })
+
+    expect(response.statusCode).toBe(500)
+    expect(response.json().message).toBe('Internal server error')
   })
 })
