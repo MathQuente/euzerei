@@ -186,6 +186,8 @@ export class Server {
       timeWindow: '1 minute',
       // Limite geral na memória; rotas com limite próprio seguem no Redis (ver o store).
       store: createHybridRateLimitStore(redis),
+      // Tamanho do LRU dos contadores em memória (o padrão é 5000 IPs distintos por janela).
+      cache: 50_000,
       nameSpace: RATE_LIMIT_NAMESPACE
     })
   }
