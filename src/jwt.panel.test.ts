@@ -25,6 +25,7 @@ const adminRepository = vi.hoisted(() => ({
 vi.mock('./repositories/cache.repository', () => ({
   CacheRepository: class {
     get = cache.get
+    mget = (keys: string[]) => Promise.all(keys.map(key => cache.get(key)))
     set = cache.set
     del = cache.del
   }

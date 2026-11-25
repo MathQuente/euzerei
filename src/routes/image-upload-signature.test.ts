@@ -11,6 +11,7 @@ vi.mock('../database/redis', () => ({ redis: {} }))
 vi.mock('../repositories/cache.repository', () => ({
   CacheRepository: class {
     get = vi.fn().mockResolvedValue(null)
+    mget = vi.fn().mockResolvedValue([null, null])
     set = vi.fn()
   }
 }))

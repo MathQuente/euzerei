@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
+import { RATE_LIMIT_NAMESPACE } from './hybrid-rate-limit-store'
 import {
   LOGIN_FAILURES_PER_EMAIL,
   LOGIN_FAILURES_PER_IP,
@@ -85,7 +86,8 @@ describe('the admin limits mirror the code that enforces them', () => {
   })
 
   it('the limiter keys keep the format the screen reads', () => {
-    const text = source('../server.ts')
-    expect(text).toContain("nameSpace: 'rate-limit'")
+    // A tela de Segurança lê `rate-limitPOST/auth/login-<ip>`: o prefixo vem desta constante.
+    expect(RATE_LIMIT_NAMESPACE).toBe('rate-limit')
+    expect(source('../server.ts')).toContain('nameSpace: RATE_LIMIT_NAMESPACE')
   })
 })

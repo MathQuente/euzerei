@@ -12,6 +12,7 @@ import fastify, { FastifyInstance } from 'fastify'
 
 const cache = vi.hoisted(() => ({
   get: vi.fn(),
+  mget: vi.fn(),
   set: vi.fn(),
   del: vi.fn()
 }))
@@ -22,6 +23,7 @@ const authRepository = vi.hoisted(() => ({
 vi.mock('./repositories/cache.repository', () => ({
   CacheRepository: class {
     get = cache.get
+    mget = cache.mget
     set = cache.set
     del = cache.del
   }
@@ -81,6 +83,11 @@ beforeAll(async () => {
 
 beforeEach(() => {
   cache.get.mockReset().mockResolvedValue(null)
+  cache.mget
+    .mockReset()
+    .mockImplementation((keys: string[]) =>
+      Promise.all(keys.map(key => cache.get(key)))
+    )
   authRepository.findToken.mockReset().mockResolvedValue(null)
 })
 
@@ -102,6 +109,17 @@ describe('app.authenticate', () => {
 
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({ userId: 'user-1' })
+  })
+
+  it('reads both revocation marks in a single command', async () => {
+    const response = await app.inject({
+      url: '/private',
+      cookies: { accessToken: accessToken() }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(cache.mget).toHaveBeenCalledTimes(1)
+    expect(cache.mget.mock.calls[0][0]).toHaveLength(2)
   })
 
   it('does not accept an access token sent in the Authorization header', async () => {
