@@ -1,6 +1,7 @@
 import { Worker } from 'bullmq'
 import { bullConnection } from '../queues/connection'
 import { IMPORT_WORKER_TUNING } from './worker-tuning'
+import { attachRunRecorder } from './import-run-recorder'
 import {
   XBOX_IMPORT_QUEUE_NAME,
   XboxImportJobData
@@ -87,6 +88,8 @@ export function startXboxImportWorker() {
       error: err.message
     })
   })
+
+  attachRunRecorder(worker, 'xbox')
 
   return worker
 }

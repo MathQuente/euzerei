@@ -54,6 +54,7 @@ Table users {
   favoriteGames user_favorite_games [not null]
   auditLogs audit_logs [not null]
   settingsEdits app_settings [not null]
+  importRuns import_runs [not null]
   following follows [not null]
   followers follows [not null]
 }
@@ -247,6 +248,23 @@ Table user_favorite_games {
   }
 }
 
+Table import_runs {
+  id String [pk]
+  store String [not null]
+  userId String
+  ref String [not null]
+  status ImportRunStatus [not null]
+  attempts Int [not null]
+  games Int
+  error String
+  startedAt DateTime [not null]
+  finishedAt DateTime [not null]
+  user users
+
+  Note: 'Uma linha por importação que terminou de vez (concluída, com aviso ou falha sem nova tentativa).
+Dá o histórico que a fila do Redis não guarda (ela mantém um job por usuário e loja).'
+}
+
 Table audit_logs {
   id String [pk]
   actorId String
@@ -366,6 +384,12 @@ Enum AuditResult {
   FAILED
 }
 
+Enum ImportRunStatus {
+  DONE
+  WARNING
+  FAILED
+}
+
 Ref: refresh_token.userId > users.id [delete: Cascade]
 
 Ref: ratings.userId > users.id [delete: Cascade]
@@ -399,6 +423,8 @@ Ref: review_reports.resolvedById > users.id [delete: Set Null]
 Ref: user_game_stats.userGameId - user_games.id [delete: Cascade]
 
 Ref: user_favorite_games.userId > users.id [delete: Cascade]
+
+Ref: import_runs.userId > users.id [delete: Set Null]
 
 Ref: audit_logs.actorId > users.id [delete: Set Null]
 

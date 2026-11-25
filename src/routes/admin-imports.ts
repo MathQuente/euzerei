@@ -1,12 +1,15 @@
 import { FastifyInstance } from 'fastify'
 import { ZodTypeProvider } from 'fastify-type-provider-zod'
+import { AdminImportRunsController } from '../controllers/admin-import-runs.controller'
 import { AdminImportsController } from '../controllers/admin-imports.controller'
 import { importQueues, importQueuesRedis } from '../queues/import-queues'
 import { AdminRepository } from '../repositories/admin.repository'
 import { ImportQueueRepository } from '../repositories/import-queue.repository'
+import { AdminImportRunsService } from '../services/admin-import-runs.service'
 import { AdminImportsService } from '../services/admin-imports.service'
 
 let shared: AdminImportsController | undefined
+let sharedRuns: AdminImportRunsController | undefined
 
 function buildController() {
   shared ??= new AdminImportsController(
@@ -20,6 +23,8 @@ function buildController() {
 
 export async function adminImportsRoutes(app: FastifyInstance) {
   const controller = buildController()
+  sharedRuns ??= new AdminImportRunsController(new AdminImportRunsService())
+  const runs = sharedRuns
   const typed = app.withTypeProvider<ZodTypeProvider>()
 
   typed.get('/', async (request, reply) => controller.list(request, reply))
@@ -28,6 +33,9 @@ export async function adminImportsRoutes(app: FastifyInstance) {
   )
   typed.get('/failures', async (request, reply) =>
     controller.failures(request, reply)
+  )
+  typed.get('/runs/summary', async (request, reply) =>
+    runs.summary(request, reply)
   )
 }
 

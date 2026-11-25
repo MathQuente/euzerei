@@ -237,7 +237,8 @@ export class AdminImportsService {
 
   private toItem(record: ImportJobRecord, handle: string | null) {
     return {
-      id: record.id,
+      // Opaco: o id do job termina com o UUID do usuário. É o mesmo id de Repetir e Descartar.
+      id: failedJobId(record.store, record.id, record.timestamp),
       store: record.store,
       handle,
       status: statusOf(record),

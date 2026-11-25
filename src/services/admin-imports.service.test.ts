@@ -95,7 +95,10 @@ describe('AdminImportsService.list', () => {
     const page = await service.list({ page: 1 })
 
     expect(page.total).toBe(3)
-    expect(page.items.map(i => i.id)).toEqual(['b', 'c', 'a'])
+    expect(page.items.map(i => i.status)).toEqual(['failed', 'running', 'done'])
+    const ids = page.items.map(i => i.id)
+    expect(new Set(ids).size).toBe(3)
+    ids.forEach(id => expect(id).toMatch(/^[0-9a-f]{16}$/))
     expect(page.items[0]).toMatchObject({
       status: 'failed',
       reason: 'Perfil privado',
@@ -122,7 +125,7 @@ describe('AdminImportsService.list', () => {
     })
 
     expect(page.total).toBe(1)
-    expect(page.items.map(i => i.id)).toEqual(['b'])
+    expect(page.items.map(i => i.id)).toEqual([failedJobId('xbox', 'b', 1_000)])
     expect(repo.newest).not.toHaveBeenCalledWith(
       'steam',
       expect.anything(),
@@ -958,5 +961,18 @@ describe('AdminImportsService: repetir e descartar job falho', () => {
       expect(JSON.stringify(result)).not.toContain('psn-import-u1')
       expect(failedJobId('psn', 'psn-import-u1', 2_000)).not.toBe(PUBLIC_ID)
     })
+  })
+})
+
+describe('AdminImportsService.list id', () => {
+  it('is opaque: it never carries the job id, which ends with the user id', async () => {
+    const { service } = setup([
+      job({ id: 'steam-import-3f2a9c1e-7b6d-4e0a-9c11-aa22bb33cc44' })
+    ])
+
+    const { items } = await service.list({ page: 1 })
+
+    expect(items[0]?.id).toMatch(/^[0-9a-f]{16}$/)
+    expect(JSON.stringify(items)).not.toContain('3f2a9c1e')
   })
 })

@@ -1,6 +1,7 @@
 import { Worker } from 'bullmq'
 import { bullConnection } from '../queues/connection'
 import { IMPORT_WORKER_TUNING } from './worker-tuning'
+import { attachRunRecorder } from './import-run-recorder'
 import {
   STEAM_IMPORT_QUEUE_NAME,
   SteamImportJobData
@@ -84,6 +85,8 @@ export function startSteamImportWorker() {
       error: err.message
     })
   })
+
+  attachRunRecorder(worker, 'steam')
 
   return worker
 }

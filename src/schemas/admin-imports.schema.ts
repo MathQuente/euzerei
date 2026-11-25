@@ -22,3 +22,16 @@ export const ImportListQuerySchema = z.object({
 })
 
 export type ImportListQuery = z.infer<typeof ImportListQuerySchema>
+
+export const IMPORT_RUNS_PERIODS = [7, 30] as const
+
+export const ImportRunsSummaryQuerySchema = z.object({
+  days: z
+    .enum(['7', '30'])
+    .default('7')
+    .transform(value => Number(value) as (typeof IMPORT_RUNS_PERIODS)[number])
+})
+
+export type ImportRunsSummaryQuery = z.infer<
+  typeof ImportRunsSummaryQuerySchema
+>

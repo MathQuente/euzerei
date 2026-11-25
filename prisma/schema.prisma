@@ -67,6 +67,7 @@ model User {
   favoriteGames         UserFavoriteGame[]
   auditLogs             AuditLog[]
   settingsEdits         AppSetting[]
+  importRuns            ImportRun[]
 
   following Follow[] @relation("FollowFollower")
   followers Follow[] @relation("FollowFollowing")
@@ -384,6 +385,32 @@ enum AuditArea {
 enum AuditResult {
   OK
   FAILED
+}
+
+enum ImportRunStatus {
+  DONE
+  WARNING
+  FAILED
+}
+
+/// Uma linha por importação que terminou de vez (concluída, com aviso ou falha sem nova tentativa).
+/// Dá o histórico que a fila do Redis não guarda (ela mantém um job por usuário e loja).
+model ImportRun {
+  id         String          @id @default(uuid())
+  store      String
+  userId     String?         @map("user_id")
+  ref        String
+  status     ImportRunStatus
+  attempts   Int
+  games      Int?
+  error      String?
+  startedAt  DateTime        @map("started_at")
+  finishedAt DateTime        @map("finished_at")
+  user       User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([finishedAt])
+  @@index([userId])
+  @@map("import_runs")
 }
 
 model AuditLog {
