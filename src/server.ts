@@ -3,6 +3,10 @@ import fastifyHelmet from '@fastify/helmet'
 import fastifyRateLimit from '@fastify/rate-limit'
 import { redis } from './database/redis'
 import {
+  RATE_LIMIT_NAMESPACE,
+  createHybridRateLimitStore
+} from './utils/hybrid-rate-limit-store'
+import {
   serializerCompiler,
   validatorCompiler
 } from 'fastify-type-provider-zod'
@@ -180,8 +184,11 @@ export class Server {
     await this.app.register(fastifyRateLimit, {
       max: 300,
       timeWindow: '1 minute',
-      redis,
-      nameSpace: 'rate-limit'
+      // Limite geral na memória; rotas com limite próprio seguem no Redis (ver o store).
+      store: createHybridRateLimitStore(redis),
+      // Tamanho do LRU dos contadores em memória (o padrão é 5000 IPs distintos por janela).
+      cache: 50_000,
+      nameSpace: RATE_LIMIT_NAMESPACE
     })
   }
 

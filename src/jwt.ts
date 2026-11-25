@@ -52,17 +52,28 @@ function verifyAccessCookie(request: FastifyRequest) {
   return request.jwtVerify({ onlyCookie: true })
 }
 
+/**
+ * Lê as duas marcas de revogação num comando só: a do token e a da conta (`sessionsRevokedAt`).
+ * Eram dois GET por requisição autenticada.
+ */
+async function readRevocation(
+  token: string,
+  userId: string
+): Promise<{ tokenRevoked: boolean; revokedAt: unknown }> {
+  const [revokedToken, revokedAt] = await cacheRepository.mget([
+    revokedAccessTokenKey(token),
+    sessionsRevokedAtKey(userId)
+  ])
+  return { tokenRevoked: revokedToken !== null, revokedAt }
+}
+
 async function isSessionRevoked(request: FastifyRequest): Promise<boolean> {
   const accessToken = request.cookies.accessToken
   if (!accessToken) return true
 
-  const revokedToken = await cacheRepository.get(
-    revokedAccessTokenKey(accessToken)
-  )
-  if (revokedToken !== null) return true
-
   const { userId, iat } = request.user as { userId: string; iat?: number }
-  const revokedAt = await cacheRepository.get(sessionsRevokedAtKey(userId))
+  const { tokenRevoked, revokedAt } = await readRevocation(accessToken, userId)
+  if (tokenRevoked) return true
   return typeof revokedAt === 'number' && (iat ?? 0) < revokedAt
 }
 
@@ -77,12 +88,11 @@ async function isPanelTokenRevoked(
   token: string,
   payload: PanelTokenPayload
 ): Promise<boolean> {
-  const revokedToken = await cacheRepository.get(revokedAccessTokenKey(token))
-  if (revokedToken !== null) return true
-
-  const revokedAt = await cacheRepository.get(
-    sessionsRevokedAtKey(payload.userId)
+  const { tokenRevoked, revokedAt } = await readRevocation(
+    token,
+    payload.userId
   )
+  if (tokenRevoked) return true
   return typeof revokedAt === 'number' && (payload.iat ?? 0) < revokedAt
 }
 

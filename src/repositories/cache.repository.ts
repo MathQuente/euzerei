@@ -18,6 +18,13 @@ export class CacheRepository {
     return JSON.parse(cached)
   }
 
+  /** Um comando só para várias chaves (o Upstash cobra por comando). Chave ausente vira null. */
+  async mget(keys: string[]): Promise<(unknown | null)[]> {
+    if (keys.length === 0) return []
+    const cached = await redis.mget(...keys)
+    return cached.map(value => (value === null ? null : JSON.parse(value)))
+  }
+
   async set(key: string, value: unknown, ttlSeconds: number): Promise<void> {
     const serializedValue = JSON.stringify(value)
 
