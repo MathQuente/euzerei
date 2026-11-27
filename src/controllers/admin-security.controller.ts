@@ -16,6 +16,10 @@ export class AdminSecurityController {
     return reply.send(await this.adminSecurityService.blocks())
   }
 
+  async logins(_request: FastifyRequest, reply: FastifyReply) {
+    return reply.send(await this.adminSecurityService.logins())
+  }
+
   async sessions(_request: FastifyRequest, reply: FastifyReply) {
     return reply.send(await this.adminSecurityService.sessions())
   }

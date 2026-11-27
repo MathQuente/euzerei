@@ -30,6 +30,9 @@ import { createTtlCache } from '../utils/ttl-cache'
 export const SECURITY_TTL_MS = 30_000
 export const BLOCKS_LIMIT = 50
 export const SESSIONS_LIMIT = 10
+export const LOGIN_RETENTION_DAYS = 30
+export const LOGIN_PURGE_BATCH = 5000
+const DAY_MS = 24 * 60 * 60 * 1000
 const UNAVAILABLE = 'Não foi possível ler a segurança agora.'
 
 export type SecurityEnv = Record<string, string | undefined>
@@ -173,11 +176,12 @@ export class AdminSecurityService {
   }
 
   private async buildSummary(now: Date) {
-    const [blocks, sessions, terms, emails] = await Promise.allSettled([
+    const [blocks, sessions, terms, emails, logins] = await Promise.allSettled([
       this.blocks(now),
       this.store.sessionTotals(now),
       this.store.termsPending(TERMS_VERSION),
-      this.store.emailsPending()
+      this.store.emailsPending(),
+      this.logins(now)
     ])
     const value = <T>(result: PromiseSettledResult<T>) =>
       result.status === 'fulfilled' ? result.value : null
@@ -195,7 +199,54 @@ export class AdminSecurityService {
         termsPending === null
           ? null
           : { version: TERMS_VERSION, pending: termsPending },
-      emailsPending: value(emails)
+      emailsPending: value(emails),
+      logins: (() => {
+        const attempts = value(logins)
+        return attempts
+          ? {
+              windowHours: attempts.windowHours,
+              total: attempts.total,
+              failed: attempts.failed,
+              historySince: attempts.historySince,
+              partial: attempts.partial
+            }
+          : null
+      })()
+    }
+  }
+
+  logins(now: Date = new Date()) {
+    return this.cached('logins', () =>
+      withReadLimit(() => this.buildLogins(now), UNAVAILABLE)
+    )
+  }
+
+  private async buildLogins(now: Date) {
+    // A limpeza roda aqui (no máximo a cada 30 s, pelo cache) e nunca atrasa nem derruba a leitura.
+    void this.store
+      .purgeLoginAttempts(
+        new Date(now.getTime() - LOGIN_RETENTION_DAYS * DAY_MS),
+        LOGIN_PURGE_BATCH
+      )
+      .catch(() => undefined)
+
+    const [hours, earliest] = await Promise.all([
+      this.store.loginHours(now),
+      this.store.loginsEarliest()
+    ])
+    const windowStart = hours[0]?.hour ?? now
+    return {
+      generatedAt: now.toISOString(),
+      windowHours: hours.length,
+      total: hours.reduce((sum, hour) => sum + hour.total, 0),
+      failed: hours.reduce((sum, hour) => sum + hour.failed, 0),
+      historySince: earliest ? earliest.toISOString() : null,
+      partial: earliest === null || earliest > windowStart,
+      hours: hours.map(hour => ({
+        hour: hour.hour.toISOString(),
+        total: hour.total,
+        failed: hour.failed
+      }))
     }
   }
 

@@ -11,6 +11,7 @@ import fastify, { FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import { ClientError } from '../errors/client-error'
 import { PanelAuthService } from './panel-auth.service'
+import { LoginAttemptRecorder } from './login-attempt-recorder'
 import { revokedAccessTokenKey } from './auth.service'
 import { passwordFingerprint } from '../utils/panel-token'
 import type { AdminRepository } from '../repositories/admin.repository'
@@ -23,6 +24,8 @@ const authService = { validateUser: vi.fn() }
 const adminRepository = { findById: vi.fn() }
 const cache = { set: vi.fn() }
 const audit = { record: vi.fn() }
+const attempts = { create: vi.fn() }
+const flush = () => new Promise(resolve => setImmediate(resolve))
 
 let app: FastifyInstance
 let service: PanelAuthService
@@ -49,7 +52,8 @@ beforeAll(async () => {
     adminRepository as unknown as AdminRepository,
     app.jwt,
     cache as unknown as CacheRepository,
-    audit as unknown as AuditService
+    audit as unknown as AuditService,
+    new LoginAttemptRecorder(attempts)
   )
 })
 
@@ -60,6 +64,7 @@ beforeEach(() => {
   adminRepository.findById.mockReset().mockResolvedValue(adminRow())
   cache.set.mockReset().mockResolvedValue(undefined)
   audit.record.mockReset().mockResolvedValue(undefined)
+  attempts.create.mockReset().mockResolvedValue(undefined)
 })
 
 afterAll(async () => {
@@ -191,6 +196,58 @@ describe('PanelAuthService.login', () => {
     await expect(
       service.login('dono@exemplo.com', 'senha', '1.2.3.4')
     ).rejects.toMatchObject({ statusCode: 429 })
+  })
+})
+
+describe('PanelAuthService.login: login_attempts', () => {
+  it('records a SUCCESS from the panel for an admin', async () => {
+    await service.login('dono@exemplo.com', 'senha', '1.2.3.4')
+    await flush()
+
+    expect(attempts.create).toHaveBeenCalledOnce()
+    expect(attempts.create).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'PANEL', outcome: 'SUCCESS' })
+    )
+  })
+
+  it('a non-admin with the right password counts as a failure, never a success', async () => {
+    adminRepository.findById.mockResolvedValue(adminRow({ role: 'USER' }))
+
+    await expect(
+      service.login('dono@exemplo.com', 'senha', '1.2.3.4')
+    ).rejects.toMatchObject({ statusCode: 401 })
+    await flush()
+
+    expect(attempts.create).toHaveBeenCalledOnce()
+    expect(attempts.create).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'PANEL', outcome: 'BAD_CREDENTIALS' })
+    )
+  })
+
+  it('a wrong password and a lockout are recorded with their own outcome', async () => {
+    authService.validateUser.mockRejectedValueOnce(new ClientError('x'))
+    await expect(
+      service.login('dono@exemplo.com', 'errada', '1.2.3.4')
+    ).rejects.toMatchObject({ statusCode: 401 })
+    authService.validateUser.mockRejectedValueOnce(new ClientError('x', 429))
+    await expect(
+      service.login('dono@exemplo.com', 'errada', '1.2.3.4')
+    ).rejects.toMatchObject({ statusCode: 429 })
+    await flush()
+
+    expect(attempts.create.mock.calls.map(call => call[0].outcome)).toEqual([
+      'BAD_CREDENTIALS',
+      'LOCKED'
+    ])
+  })
+
+  it('a database failure while recording does not break the login', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    attempts.create.mockRejectedValue(new Error('connection terminated'))
+
+    await expect(
+      service.login('dono@exemplo.com', 'senha', '1.2.3.4')
+    ).resolves.toHaveProperty('token')
   })
 })
 

@@ -6,6 +6,7 @@ import { AuthService } from '../services/auth.service'
 import { ClientError } from '../errors/client-error'
 import { ReauthRequiredError } from '../errors/reauth-required-error'
 import { ProviderLinkError } from '../errors/provider-link-error'
+import type { LoginAttemptRecorder } from '../services/login-attempt-recorder'
 
 function fakeReply() {
   const reply = {
@@ -400,6 +401,37 @@ describe('AuthController provider callbacks', () => {
     expect(linkProviderToUser).not.toHaveBeenCalled()
     expect(r.redirect).toHaveBeenCalledWith(
       'http://localhost:5173/configuracoes/seguranca?vinculo_erro=sessao&provedor=google'
+    )
+  })
+})
+
+describe('AuthController.loginHandler: login_attempts', () => {
+  const request = {
+    body: { email: 'kenzo@example.com', password: 'uma-senha-qualquer' },
+    ip: '9.9.9.9'
+  } as unknown as FastifyRequest
+
+  it('tracks the app login through validateUser and rethrows its error', async () => {
+    const error = new ClientError('Muitas tentativas', 429)
+    const track = vi.fn(async (_s, _e, _i, run: () => Promise<unknown>) =>
+      run()
+    )
+    const controller = new AuthController(
+      {
+        validateUser: vi.fn().mockRejectedValue(error)
+      } as unknown as AuthService,
+      { track: track as unknown as LoginAttemptRecorder['track'] }
+    )
+
+    await expect(controller.loginHandler(request, fakeReply())).rejects.toBe(
+      error
+    )
+
+    expect(track).toHaveBeenCalledWith(
+      'APP',
+      'kenzo@example.com',
+      '9.9.9.9',
+      expect.any(Function)
     )
   })
 })
