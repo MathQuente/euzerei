@@ -306,14 +306,16 @@ export class PsnService {
       psnImportQueue,
       psnImportJobId(userId),
       { userId },
-      'PlayStation'
+      'PlayStation',
+      { userId, store: 'psn' }
     )
   }
 
   async getImportStatus(userId: string) {
     return getImportJobStatus<PsnImportJobResult>(
       psnImportQueue,
-      psnImportJobId(userId)
+      psnImportJobId(userId),
+      { userId, store: 'psn' }
     )
   }
 

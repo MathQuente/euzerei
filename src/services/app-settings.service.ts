@@ -1,5 +1,6 @@
 import type { Prisma } from '../database/prisma-client'
 import { AppSettingsRepository } from '../repositories/app-settings.repository'
+import { invalidateAppSettingsCache } from './app-settings-reader'
 import {
   APP_SETTING_DEFAULTS,
   APP_SETTING_KEYS,
@@ -27,7 +28,7 @@ export class AppSettingsService {
   ): Promise<{ settings: AppSettings; changed: AppSettingKey[] }> {
     const requested = UpdateAppSettingsBodySchema.parse(input)
 
-    return this.appSettingsRepository.runExclusive(async tx => {
+    const result = await this.appSettingsRepository.runExclusive(async tx => {
       const current = await this.read(tx)
       const changed = (Object.keys(requested) as AppSettingKey[]).filter(
         key => requested[key] !== current[key]
@@ -54,6 +55,10 @@ export class AppSettingsService {
 
       return { settings: await this.read(tx), changed }
     })
+
+    // Depois do commit: a mudança vale na hora neste processo, sem esperar o cache de 30 s.
+    if (result.changed.length > 0) invalidateAppSettingsCache()
+    return result
   }
 
   private async read(client?: Prisma.TransactionClient): Promise<AppSettings> {

@@ -11,6 +11,10 @@ export class AppSettingsRepository {
     return client.appSetting.findMany()
   }
 
+  findByKey(key: string, client: Client = prisma) {
+    return client.appSetting.findUnique({ where: { key } })
+  }
+
   runExclusive<T>(work: (tx: Prisma.TransactionClient) => Promise<T>) {
     return prisma.$transaction(async tx => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SETTINGS_LOCK_ID}::bigint)`

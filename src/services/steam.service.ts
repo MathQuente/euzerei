@@ -261,14 +261,16 @@ export class SteamService {
       steamImportQueue,
       steamImportJobId(userId),
       { userId },
-      'Steam'
+      'Steam',
+      { userId, store: 'steam' }
     )
   }
 
   async getImportStatus(userId: string) {
     return getImportJobStatus<SteamImportJobResult>(
       steamImportQueue,
-      steamImportJobId(userId)
+      steamImportJobId(userId),
+      { userId, store: 'steam' }
     )
   }
 

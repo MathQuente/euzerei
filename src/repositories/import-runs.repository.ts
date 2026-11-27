@@ -37,6 +37,27 @@ export class ImportRunsRepository {
     }
   }
 
+  /** Quando as execuções concluídas (DONE/WARNING) do usuário na loja terminaram, da mais recente para a mais antiga. */
+  async completedFinishesSince(
+    userId: string,
+    store: string,
+    since: Date,
+    limit: number
+  ): Promise<Date[]> {
+    const rows = await prisma.importRun.findMany({
+      where: {
+        userId,
+        store,
+        status: { in: ['DONE', 'WARNING'] },
+        finishedAt: { gt: since }
+      },
+      orderBy: { finishedAt: 'desc' },
+      take: limit,
+      select: { finishedAt: true }
+    })
+    return rows.map(row => row.finishedAt)
+  }
+
   async totalsSince(since: Date): Promise<ImportRunsTotals[]> {
     const rows = await prisma.$queryRaw<
       {
