@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ZodError } from 'zod'
 import { AppSettingsService } from './app-settings.service'
 import { APP_SETTING_DEFAULTS } from '../schemas/app-settings.schema'
+import * as reader from './app-settings-reader'
 import type { AppSettingsRepository } from '../repositories/app-settings.repository'
 
 const tx = { id: 'tx' }
@@ -79,6 +80,17 @@ describe('AppSettingsService.update', () => {
       }
     )
     expect(result.changed).toEqual(['signupsOpen', 'importAutoRetry'])
+  })
+
+  it('drops the read cache after a change, but not when nothing changed', async () => {
+    const invalidate = vi.spyOn(reader, 'invalidateAppSettingsCache')
+
+    await service.update('admin-1', { signupsOpen: true }, 'ip')
+    expect(invalidate).not.toHaveBeenCalled()
+
+    await service.update('admin-1', { signupsOpen: false }, 'ip')
+    expect(invalidate).toHaveBeenCalledTimes(1)
+    invalidate.mockRestore()
   })
 
   it('reads, compares and writes inside one exclusive transaction', async () => {

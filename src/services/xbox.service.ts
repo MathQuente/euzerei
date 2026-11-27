@@ -378,14 +378,16 @@ export class XboxService {
       xboxImportQueue,
       xboxImportJobId(userId),
       { userId },
-      'Xbox'
+      'Xbox',
+      { userId, store: 'xbox' }
     )
   }
 
   async getImportStatus(userId: string) {
     return getImportJobStatus<XboxImportJobResult>(
       xboxImportQueue,
-      xboxImportJobId(userId)
+      xboxImportJobId(userId),
+      { userId, store: 'xbox' }
     )
   }
 

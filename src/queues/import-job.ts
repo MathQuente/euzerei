@@ -2,7 +2,7 @@ import { Queue, UnrecoverableError } from 'bullmq'
 import { ClientError } from '../errors/client-error'
 import { TimeoutError } from '../utils/with-timeout'
 
-export const IMPORT_COOLDOWN_MS = 60 * 60 * 1000
+import { defaultImportLimiter, type ImportLimitScope } from './import-limit'
 
 export const IMPORT_JOB_OPTIONS = {
   attempts: 2,
@@ -27,7 +27,9 @@ export async function enqueueUniqueImport(
   queue: Queue,
   jobId: string,
   data: { userId: string },
-  platformLabel: string
+  platformLabel: string,
+  scope: ImportLimitScope,
+  now: number = Date.now()
 ) {
   const existing = await queue.getJob(jobId)
 
@@ -39,16 +41,22 @@ export async function enqueueUniqueImport(
         409
       )
     }
-    if (state === 'completed' && existing.finishedOn) {
-      const remainingMs = existing.finishedOn + IMPORT_COOLDOWN_MS - Date.now()
-      if (remainingMs > 0) {
-        const remainingMinutes = Math.ceil(remainingMs / 60000)
-        throw new ClientError(
-          `Você pode importar novamente em ${remainingMinutes} minuto(s).`,
-          429
-        )
-      }
-    }
+  }
+
+  const limit = await (scope.limiter ?? defaultImportLimiter()).check(
+    scope.userId,
+    scope.store,
+    now
+  )
+  if (limit.blocked) {
+    const remainingMinutes = Math.max(1, Math.ceil((limit.until - now) / 60000))
+    throw new ClientError(
+      `Você pode importar novamente em ${remainingMinutes} minuto(s).`,
+      429
+    )
+  }
+
+  if (existing) {
     await existing.remove()
   }
 
@@ -56,22 +64,23 @@ export async function enqueueUniqueImport(
   return { status: 'queued' as const }
 }
 
-export async function getImportJobStatus<TResult>(queue: Queue, jobId: string) {
+export async function getImportJobStatus<TResult>(
+  queue: Queue,
+  jobId: string,
+  scope: ImportLimitScope,
+  now: number = Date.now()
+) {
   const job = await queue.getJob(jobId)
   if (!job) return { status: 'idle' as const }
 
   const state = await job.getState()
 
   if (state === 'completed') {
-    const cooldownUntil = job.finishedOn
-      ? job.finishedOn + IMPORT_COOLDOWN_MS
-      : undefined
     return {
       status: 'completed' as const,
       result: job.returnvalue as TResult,
       finishedAt: job.finishedOn,
-      cooldownUntil:
-        cooldownUntil && cooldownUntil > Date.now() ? cooldownUntil : undefined
+      cooldownUntil: await cooldownUntil(scope, now)
     }
   }
   if (state === 'failed') {
@@ -81,4 +90,19 @@ export async function getImportJobStatus<TResult>(queue: Queue, jobId: string) {
   const progress = typeof job.progress === 'number' ? job.progress : undefined
 
   return { status: state as 'waiting' | 'active' | 'delayed', progress }
+}
+
+// Só um aviso para a tela: se o banco falhar aqui, a consulta de status não cai (o enfileirar decide de verdade).
+async function cooldownUntil(scope: ImportLimitScope, now: number) {
+  try {
+    const limit = await (scope.limiter ?? defaultImportLimiter()).check(
+      scope.userId,
+      scope.store,
+      now
+    )
+    return limit.blocked ? limit.until : undefined
+  } catch (error) {
+    console.warn('[ImportLimit] não foi possível calcular o cooldown', error)
+    return undefined
+  }
 }
