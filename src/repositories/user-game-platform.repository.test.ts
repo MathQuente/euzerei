@@ -15,6 +15,16 @@ vi.mock('../database/db', () => ({
 
 import { UserGamePlatformRepository } from './user-game-platform.repository'
 
+const saveClearing = () =>
+  new UserGamePlatformRepository().savePlatform(
+    'user-game-1',
+    'PC' as never,
+    'PC' as never,
+    {},
+    undefined,
+    { clearGameDate: true }
+  )
+
 const save = () =>
   new UserGamePlatformRepository().savePlatform(
     'user-game-1',
@@ -76,6 +86,35 @@ describe('UserGamePlatformRepository recomputeTotals', () => {
     await save()
 
     expect(tx.userGame.update).not.toHaveBeenCalled()
+    expect(tx.userGame.updateMany).not.toHaveBeenCalled()
+  })
+
+  it('clears the game date when the date was explicitly cleared, even with completions', async () => {
+    tx.userGamePlatform.findMany.mockResolvedValue([
+      { hoursPlayed: null, completions: 1, completedAt: null }
+    ])
+
+    await saveClearing()
+
+    expect(tx.userGame.updateMany).toHaveBeenCalledWith({
+      where: { id: 'user-game-1', completedAt: { not: null } },
+      data: { completedAt: null }
+    })
+  })
+
+  it('still uses the earliest date of the other platforms when one is cleared', async () => {
+    const other = new Date('2024-01-01')
+    tx.userGamePlatform.findMany.mockResolvedValue([
+      { hoursPlayed: null, completions: 1, completedAt: null },
+      { hoursPlayed: null, completions: 1, completedAt: other }
+    ])
+
+    await saveClearing()
+
+    expect(tx.userGame.update).toHaveBeenCalledWith({
+      where: { id: 'user-game-1' },
+      data: { completedAt: other }
+    })
     expect(tx.userGame.updateMany).not.toHaveBeenCalled()
   })
 })

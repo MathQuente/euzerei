@@ -412,10 +412,15 @@ export const UserGamePlatformUpdateBodySchema = z
   .object({
     hoursPlayed: manualHours.nullable().optional(),
     completions: z.number().int().min(0).max(999).optional(),
-    completedAt: z.iso.date().nullable().optional()
+    completedAt: z.iso.date().nullable().optional(),
+    completedAtUnknown: z.boolean().optional()
   })
   .refine(body => Object.keys(body).length > 0, {
     message: 'Informe ao menos um campo para atualizar.'
+  })
+  .refine(body => !(body.completedAtUnknown && body.completedAt), {
+    message: 'Informe a data ou marque que não sabe, não os dois.',
+    path: ['completedAtUnknown']
   })
 
 export const UserGamePlatformsResponseSchema = z.object({
@@ -426,6 +431,7 @@ export const UserGamePlatformsResponseSchema = z.object({
       hoursPlayed: z.number().nullable(),
       completions: z.number(),
       completedAt: z.string().nullable(),
+      completedAtUnknown: z.boolean(),
       accountHours: z.array(
         z.object({ accountName: z.string(), hoursPlayed: z.number() })
       )

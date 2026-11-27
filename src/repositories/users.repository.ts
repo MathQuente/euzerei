@@ -474,7 +474,9 @@ export class UserRepository {
               : sortBy === 'completedAt'
                 ? // Desejo não tem data de conclusão: cairia em updated_at, que
                   // a importação e qualquer edição mexem. Vale a data de adição.
-                  Prisma.sql`CASE WHEN ugs.status = 'WISHLIST' THEN ug.created_at ELSE COALESCE(ug.completed_at, ug.updated_at) END ${direction}`
+                  // Jogado sem data ("não sei a data") também: senão pularia
+                  // para o topo a cada edição.
+                  Prisma.sql`CASE WHEN ugs.status = 'WISHLIST' THEN ug.created_at WHEN ugs.status = 'PLAYED' AND ug.completed_at IS NULL THEN ug.created_at ELSE COALESCE(ug.completed_at, ug.updated_at) END ${direction}`
                 : sortBy === 'lastPlayedAt'
                   ? Prisma.sql`ug.last_played_at ${direction} NULLS LAST, ug.created_at ${direction}`
                   : sortBy === 'droppedAt'
@@ -743,12 +745,15 @@ export class UserRepository {
     options: { endless?: boolean } = {}
   ) {
     const current =
-      statusId === DROPPED_STATUS_ID
+      statusId === DROPPED_STATUS_ID || statusId === PLAYED_STATUS_ID
         ? await prisma.userGame.findUnique({
             where: { userId_igdbId: { igdbId, userId } },
             select: { userGamesStatusId: true }
           })
         : null
+    const enteringPlayed =
+      statusId === PLAYED_STATUS_ID &&
+      current?.userGamesStatusId !== PLAYED_STATUS_ID
     return prisma.userGame.update({
       where: { userId_igdbId: { igdbId, userId } },
       data: {
@@ -757,7 +762,19 @@ export class UserRepository {
         endless: options.endless,
         ...(statusId === PLAYED_STATUS_ID ? {} : CLEAR_HUNDRED_PERCENT),
         updatedAt: new Date(),
-        completedAt: statusId === PLAYED_STATUS_ID ? new Date() : undefined
+        // Já Jogado: não sobrescreve a data (nem a ausência dela).
+        completedAt: enteringPlayed ? new Date() : undefined,
+        // Voltou a Jogado com data nova: o "não sei" antigo não vale mais.
+        ...(enteringPlayed
+          ? {
+              platforms: {
+                updateMany: {
+                  where: { completedAtUnknown: true },
+                  data: { completedAtUnknown: false }
+                }
+              }
+            }
+          : {})
       },
       select: {
         igdbId: true,
