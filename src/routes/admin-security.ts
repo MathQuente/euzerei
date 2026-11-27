@@ -16,6 +16,9 @@ export async function adminSecurityRoutes(app: FastifyInstance) {
   typed.get('/blocks', async (request, reply) =>
     controller.blocks(request, reply)
   )
+  typed.get('/logins', async (request, reply) =>
+    controller.logins(request, reply)
+  )
   typed.get('/sessions', async (request, reply) =>
     controller.sessions(request, reply)
   )

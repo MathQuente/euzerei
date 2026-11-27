@@ -265,6 +265,19 @@ Table import_runs {
 Dá o histórico que a fila do Redis não guarda (ela mantém um job por usuário e loja).'
 }
 
+Table login_attempts {
+  id String [pk]
+  emailHash String [not null]
+  ipHash String [not null]
+  source LoginSource [not null]
+  outcome LoginOutcome [not null]
+  createdAt DateTime [default: `now()`, not null]
+
+  Note: 'Uma linha por tentativa de login por senha que chegou ao handler (o limite de 3/min da rota barra antes).
+Só hashes sha256 de e-mail e IP, os mesmos das chaves do Redis: sem chave estrangeira, o @usuário se
+resolve pelo hash. Retenção de 30 dias, apagada aos poucos quando a Segurança é lida.'
+}
+
 Table audit_logs {
   id String [pk]
   actorId String
@@ -388,6 +401,18 @@ Enum ImportRunStatus {
   DONE
   WARNING
   FAILED
+}
+
+Enum LoginSource {
+  APP
+  PANEL
+}
+
+Enum LoginOutcome {
+  SUCCESS
+  BAD_CREDENTIALS
+  LOCKED
+  SUSPENDED
 }
 
 Ref: refresh_token.userId > users.id [delete: Cascade]

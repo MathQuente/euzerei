@@ -43,6 +43,9 @@ function setup(
     revokeSession: vi.fn(async () => 'maria.rpg'),
     termsPending: vi.fn(async () => 58),
     emailsPending: vi.fn(async () => 9),
+    loginHours: vi.fn(async () => []),
+    loginsEarliest: vi.fn(async () => null),
+    purgeLoginAttempts: vi.fn(async () => 0),
     ...overrides
   }
   return { service: new AdminSecurityService(store, {}), store }
@@ -189,7 +192,14 @@ describe('AdminSecurityService.summary', () => {
       blocks: { active: 1, truncated: false },
       sessions: { sessions: 214, users: 180 },
       terms: { version: TERMS_VERSION, pending: 58 },
-      emailsPending: 9
+      emailsPending: 9,
+      logins: {
+        windowHours: 0,
+        total: 0,
+        failed: 0,
+        historySince: null,
+        partial: true
+      }
     })
   })
 
@@ -210,6 +220,80 @@ describe('AdminSecurityService.summary', () => {
     expect(summary.terms).toMatchObject({ pending: 58 })
     expect(summary.emailsPending).toBe(9)
     expect(JSON.stringify(summary)).not.toContain('refresh_token')
+  })
+
+  it('a failing login history becomes null and the rest still answers', async () => {
+    const { service } = setup([], [], {
+      loginHours: vi.fn(async () => {
+        throw new Error('relation "login_attempts" does not exist')
+      })
+    })
+
+    const summary = await service.summary(now)
+
+    expect(summary.logins).toBeNull()
+    expect(summary.emailsPending).toBe(9)
+    expect(JSON.stringify(summary)).not.toContain('login_attempts')
+  })
+})
+
+describe('AdminSecurityService.logins', () => {
+  const hourAt = (offset: number) =>
+    new Date(Date.parse('2026-11-21T15:00:00.000Z') + offset * 3_600_000)
+  const hours = Array.from({ length: 24 }, (_, i) => ({
+    hour: hourAt(i - 23),
+    total: i === 23 ? 10 : 1,
+    failed: i === 23 ? 4 : 0
+  }))
+
+  it('sums the 24 hours and flags a history that starts inside the window', async () => {
+    const { service } = setup([], [], {
+      loginHours: vi.fn(async () => hours),
+      loginsEarliest: vi.fn(async () => hourAt(-5))
+    })
+
+    const result = await service.logins(now)
+
+    expect(result).toMatchObject({
+      windowHours: 24,
+      total: 33,
+      failed: 4,
+      historySince: hourAt(-5).toISOString(),
+      partial: true
+    })
+    expect(result.hours).toHaveLength(24)
+    expect(result.hours[23]).toEqual({
+      hour: hourAt(0).toISOString(),
+      total: 10,
+      failed: 4
+    })
+  })
+
+  it('is complete when the history reaches back before the window', async () => {
+    const { service } = setup([], [], {
+      loginHours: vi.fn(async () => hours),
+      loginsEarliest: vi.fn(async () => hourAt(-72))
+    })
+
+    expect((await service.logins(now)).partial).toBe(false)
+  })
+
+  it('purges at most one batch of attempts older than 30 days, and a failing purge does not break the read', async () => {
+    const purge = vi.fn(async () => {
+      throw new Error('boom')
+    })
+    const { service } = setup([], [], {
+      loginHours: vi.fn(async () => hours),
+      loginsEarliest: vi.fn(async () => hourAt(-72)),
+      purgeLoginAttempts: purge
+    })
+
+    await expect(service.logins(now)).resolves.toMatchObject({ failed: 4 })
+
+    expect(purge).toHaveBeenCalledWith(
+      new Date(now.getTime() - 30 * 24 * 3_600_000),
+      5000
+    )
   })
 })
 
@@ -323,6 +407,9 @@ describe('AdminSecurityService: ações', () => {
       revokeSession: vi.fn(async () => 'maria.rpg'),
       termsPending: vi.fn(async () => 0),
       emailsPending: vi.fn(async () => 0),
+      loginHours: vi.fn(async () => []),
+      loginsEarliest: vi.fn(async () => null),
+      purgeLoginAttempts: vi.fn(async () => 0),
       ...overrides
     }
     return { service: new AdminSecurityService(store, {}, log), store, log }

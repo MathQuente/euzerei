@@ -1,4 +1,8 @@
 import { prisma } from '../database/db'
+import {
+  LoginAttemptsRepository,
+  type LoginHourRow
+} from './login-attempts.repository'
 import { redis } from '../database/redis'
 import { classifyLoginKey, type LoginKey } from '../utils/admin-security-keys'
 
@@ -50,9 +54,26 @@ export interface SecurityStore {
   ): Promise<string | null>
   termsPending(version: string): Promise<number>
   emailsPending(): Promise<number>
+  loginHours(now: Date): Promise<LoginHourRow[]>
+  loginsEarliest(): Promise<Date | null>
+  purgeLoginAttempts(before: Date, limit: number): Promise<number>
 }
 
 export class AdminSecurityRepository implements SecurityStore {
+  constructor(private loginAttempts = new LoginAttemptsRepository()) {}
+
+  loginHours(now: Date) {
+    return this.loginAttempts.hours(now)
+  }
+
+  loginsEarliest() {
+    return this.loginAttempts.earliest()
+  }
+
+  purgeLoginAttempts(before: Date, limit: number) {
+    return this.loginAttempts.purgeBefore(before, limit)
+  }
+
   async scanLoginKeys() {
     const keys: ScannedKey[] = []
     let cursor = '0'

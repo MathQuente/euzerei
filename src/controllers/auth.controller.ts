@@ -1,3 +1,4 @@
+import { LoginAttemptRecorder } from '../services/login-attempt-recorder'
 import { FastifyReply, FastifyRequest } from 'fastify'
 import { AuthService } from '../services/auth.service'
 import * as AuthSchema from '../schemas/auth.schema'
@@ -24,7 +25,13 @@ function isRateLimited(error: unknown) {
 }
 
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private loginAttempts: Pick<
+      LoginAttemptRecorder,
+      'track'
+    > = new LoginAttemptRecorder()
+  ) {}
 
   private oauthErrorCode(error: unknown) {
     if (error instanceof TermsRequiredError) return 'terms_required'
@@ -73,10 +80,11 @@ export class AuthController {
   async loginHandler(request: FastifyRequest, reply: FastifyReply) {
     const { email, password } = AuthSchema.LoginBodySchema.parse(request.body)
 
-    const { user } = await this.authService.validateUser(
+    const { user } = await this.loginAttempts.track(
+      'APP',
       email,
-      password,
-      request.ip
+      request.ip,
+      () => this.authService.validateUser(email, password, request.ip)
     )
 
     const { accessToken, refreshToken } = await this.authService.generateTokens(

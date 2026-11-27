@@ -6,6 +6,7 @@ import { AuditService } from './audit.service'
 import { AuthService, revokedAccessTokenKey } from './auth.service'
 import { PANEL_TOKEN_TTL, passwordFingerprint } from '../utils/panel-token'
 import { logError } from '../utils/respond-unavailable'
+import { LoginAttemptRecorder } from './login-attempt-recorder'
 
 const INVALID_CREDENTIALS_MESSAGE = 'Email ou senha incorretos.'
 const UNAVAILABLE_MESSAGE =
@@ -17,10 +18,21 @@ export class PanelAuthService {
     private adminRepository: AdminRepository,
     private jwt: JWT,
     private cacheRepository: CacheRepository,
-    private auditService: AuditService
+    private auditService: AuditService,
+    private loginAttempts: Pick<
+      LoginAttemptRecorder,
+      'track'
+    > = new LoginAttemptRecorder()
   ) {}
 
-  async login(email: string, password: string, ip: string) {
+  /** O desfecho gravado é o do painel: quem acerta a senha mas não é admin conta como falha. */
+  login(email: string, password: string, ip: string) {
+    return this.loginAttempts.track('PANEL', email, ip, () =>
+      this.authenticate(email, password, ip)
+    )
+  }
+
+  private async authenticate(email: string, password: string, ip: string) {
     let userId: string
     try {
       const { user } = await this.authService.validateUser(email, password, ip)

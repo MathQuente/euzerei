@@ -413,6 +413,33 @@ model ImportRun {
   @@map("import_runs")
 }
 
+enum LoginSource {
+  APP
+  PANEL
+}
+
+enum LoginOutcome {
+  SUCCESS
+  BAD_CREDENTIALS
+  LOCKED
+  SUSPENDED
+}
+
+/// Uma linha por tentativa de login por senha que chegou ao handler (o limite de 3/min da rota barra antes).
+/// Só hashes sha256 de e-mail e IP, os mesmos das chaves do Redis: sem chave estrangeira, o @usuário se
+/// resolve pelo hash. Retenção de 30 dias, apagada aos poucos quando a Segurança é lida.
+model LoginAttempt {
+  id        String       @id @default(uuid())
+  emailHash String       @map("email_hash")
+  ipHash    String       @map("ip_hash")
+  source    LoginSource
+  outcome   LoginOutcome
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("login_attempts")
+}
+
 model AuditLog {
   id        String      @id @default(uuid())
   actorId   String?     @map("actor_id")

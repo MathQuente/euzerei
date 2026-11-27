@@ -36,6 +36,7 @@ const adminSecurityService = vi.hoisted(() => ({
   endSession: vi.fn(),
   summary: vi.fn(),
   blocks: vi.fn(),
+  logins: vi.fn(),
   sessions: vi.fn(),
   protections: vi.fn()
 }))
@@ -128,6 +129,7 @@ vi.mock('../services/admin-security.service', () => ({
     endSession = adminSecurityService.endSession
     summary = adminSecurityService.summary
     blocks = adminSecurityService.blocks
+    logins = adminSecurityService.logins
     sessions = adminSecurityService.sessions
     protections = adminSecurityService.protections
   }
@@ -962,6 +964,7 @@ describe('GET /admin/catalog/*', () => {
 const SECURITY_PATHS = [
   '/admin/security/summary',
   '/admin/security/blocks',
+  '/admin/security/logins',
   '/admin/security/sessions',
   '/admin/security/protections'
 ]
@@ -969,6 +972,7 @@ const SECURITY_PATHS = [
 const securityServices = () => [
   adminSecurityService.summary,
   adminSecurityService.blocks,
+  adminSecurityService.logins,
   adminSecurityService.sessions,
   adminSecurityService.protections
 ]
@@ -992,6 +996,7 @@ describe('GET /admin/security/*', () => {
   it.each([
     ['/admin/security/summary', () => adminSecurityService.summary],
     ['/admin/security/blocks', () => adminSecurityService.blocks],
+    ['/admin/security/logins', () => adminSecurityService.logins],
     ['/admin/security/sessions', () => adminSecurityService.sessions]
   ] as const)('%s answers the service result', async (url, service) => {
     const app = await buildApp(allowAdmin)
@@ -1018,6 +1023,7 @@ describe('GET /admin/security/*', () => {
   it.each([
     ['/admin/security/summary', () => adminSecurityService.summary],
     ['/admin/security/blocks', () => adminSecurityService.blocks],
+    ['/admin/security/logins', () => adminSecurityService.logins],
     ['/admin/security/sessions', () => adminSecurityService.sessions]
   ] as const)(
     '%s: a failure is a 500 with the generic message, no internals',
