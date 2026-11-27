@@ -14,6 +14,7 @@ type Row = {
   hoursPlayed: Prisma.Decimal | null
   completions: number
   completedAt: Date | null
+  completedAtUnknown?: boolean
   accountHours: {
     hoursPlayed: Prisma.Decimal
     platformAccount: { displayName: string }
@@ -315,6 +316,164 @@ describe('UserGamePlatformService.updatePlatform', () => {
         completedAt: '2999-01-01'
       })
     ).rejects.toMatchObject({ statusCode: 400 })
+  })
+
+  it('asks the repository to clear the game date when the date is cleared', async () => {
+    const { service, platformRepository } = setup(
+      userGame({
+        statusId: 1,
+        platforms: [
+          row({
+            platform: 'STEAM',
+            completions: 1,
+            completedAt: new Date('2024-01-01T00:00:00Z')
+          })
+        ]
+      })
+    )
+
+    await service.updatePlatform('user-1', 10, 'STEAM', 'UNKNOWN', {
+      completedAt: null
+    })
+
+    expect(platformRepository.savePlatform).toHaveBeenCalledWith(
+      'ug-1',
+      'STEAM',
+      'UNKNOWN',
+      { completedAt: null },
+      undefined,
+      { clearGameDate: true }
+    )
+  })
+
+  it('marks the date as unknown, clearing it and asking to clear the game date', async () => {
+    const { service, platformRepository } = setup(
+      userGame({
+        statusId: 1,
+        platforms: [row({ platform: 'STEAM', completions: 1 })]
+      })
+    )
+
+    await service.updatePlatform('user-1', 10, 'STEAM', 'UNKNOWN', {
+      completedAtUnknown: true
+    })
+
+    expect(platformRepository.savePlatform).toHaveBeenCalledWith(
+      'ug-1',
+      'STEAM',
+      'UNKNOWN',
+      { completedAt: null, completedAtUnknown: true },
+      undefined,
+      { clearGameDate: true }
+    )
+  })
+
+  it('rejects marking the date as unknown when the game is not played', async () => {
+    const { service } = setup(
+      userGame({ statusId: 3, platforms: [row({ platform: 'STEAM' })] })
+    )
+
+    await expect(
+      service.updatePlatform('user-1', 10, 'STEAM', 'UNKNOWN', {
+        completedAtUnknown: true
+      })
+    ).rejects.toMatchObject({ statusCode: 400 })
+  })
+
+  it('drops the unknown mark when a real date is set', async () => {
+    const { service, platformRepository } = setup(
+      userGame({
+        statusId: 1,
+        platforms: [
+          row({ platform: 'STEAM', completions: 1, completedAtUnknown: true })
+        ]
+      })
+    )
+
+    await service.updatePlatform('user-1', 10, 'STEAM', 'UNKNOWN', {
+      completedAt: '2024-01-01'
+    })
+
+    expect(platformRepository.savePlatform.mock.calls[0][3]).toMatchObject({
+      completedAt: new Date('2024-01-01T00:00:00.000Z'),
+      completedAtUnknown: false
+    })
+  })
+
+  it('keeps an unknown date unknown on re-import, even with a real date', async () => {
+    const { service, platformRepository } = setup(
+      userGame({
+        statusId: 1,
+        completions: 1,
+        platforms: [
+          row({ platform: 'STEAM', completions: 1, completedAtUnknown: true })
+        ]
+      })
+    )
+
+    await service.importPlatform('user-1', 10, 'STEAM', {
+      statusId: 1,
+      activityStatusId: 3,
+      hoursPlayed: 30,
+      finished: true,
+      confirmedFinished: true,
+      completedAt: new Date('2024-05-05T00:00:00Z')
+    })
+
+    expect(platformRepository.savePlatform.mock.calls[0][3]).toMatchObject({
+      completedAt: null
+    })
+  })
+
+  it('does not refill a cleared date with today on re-import', async () => {
+    const { service, platformRepository } = setup(
+      userGame({
+        statusId: 1,
+        completions: 1,
+        platforms: [
+          row({ platform: 'STEAM', completions: 1, completedAt: null })
+        ]
+      })
+    )
+
+    await service.importPlatform('user-1', 10, 'STEAM', {
+      statusId: 1,
+      activityStatusId: 3,
+      hoursPlayed: 30,
+      finished: true,
+      confirmedFinished: true
+    })
+
+    expect(platformRepository.savePlatform.mock.calls[0][3]).toMatchObject({
+      completions: 1,
+      completedAt: null
+    })
+  })
+
+  it('still takes a real date from the import for a row without one', async () => {
+    const importedDate = new Date('2024-05-05T00:00:00Z')
+    const { service, platformRepository } = setup(
+      userGame({
+        statusId: 1,
+        completions: 1,
+        platforms: [
+          row({ platform: 'STEAM', completions: 1, completedAt: null })
+        ]
+      })
+    )
+
+    await service.importPlatform('user-1', 10, 'STEAM', {
+      statusId: 1,
+      activityStatusId: 3,
+      hoursPlayed: 30,
+      finished: true,
+      confirmedFinished: true,
+      completedAt: importedDate
+    })
+
+    expect(platformRepository.savePlatform.mock.calls[0][3]).toMatchObject({
+      completedAt: importedDate
+    })
   })
 
   it('returns 404 for a platform the game does not have', async () => {

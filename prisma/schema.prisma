@@ -175,6 +175,8 @@ model UserGamePlatform {
   hoursPlayed Decimal?  @map("hours_played") @db.Decimal(6, 2)
   completions Int       @default(0)
   completedAt DateTime? @map("completed_at")
+  // A pessoa disse que não sabe a data: diferente de nunca ter informado.
+  completedAtUnknown Boolean @default(false) @map("completed_at_unknown")
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 

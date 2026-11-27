@@ -105,6 +105,7 @@ Table user_game_platforms {
   hoursPlayed Decimal
   completions Int [not null, default: 0]
   completedAt DateTime
+  completedAtUnknown Boolean [not null, default: false]
   createdAt DateTime [default: `now()`, not null]
   updatedAt DateTime [not null]
   userGame user_games [not null]

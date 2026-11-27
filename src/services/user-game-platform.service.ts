@@ -45,6 +45,7 @@ export interface PlatformPatch {
   hoursPlayed?: number | null
   completions?: number
   completedAt?: string | null
+  completedAtUnknown?: boolean
 }
 
 type UserGameWithPlatforms = NonNullable<
@@ -128,6 +129,7 @@ export class UserGamePlatformService {
         hoursPlayed: p.hoursPlayed != null ? Number(p.hoursPlayed) : null,
         completions: p.completions,
         completedAt: toDateString(p.completedAt),
+        completedAtUnknown: p.completedAtUnknown ?? false,
         accountHours: p.accountHours.map(a => ({
           accountName: a.platformAccount.displayName,
           hoursPlayed: Number(a.hoursPlayed)
@@ -267,17 +269,43 @@ export class UserGamePlatformService {
           )
         }
         values.completedAt = parsed
+        values.completedAtUnknown = false
       } else {
         values.completedAt = null
       }
     }
 
-    await this.platformRepository.savePlatform(
-      userGame.id,
-      platform,
-      gameConsole,
-      values
-    )
+    if (patch.completedAtUnknown !== undefined) {
+      if (
+        patch.completedAtUnknown &&
+        userGame.userGamesStatusId !== PLAYED_STATUS_ID
+      ) {
+        throw new ClientError(
+          'Só é possível marcar a data como desconhecida em jogos marcados como Jogado.',
+          400
+        )
+      }
+      values.completedAtUnknown = patch.completedAtUnknown
+      if (patch.completedAtUnknown) values.completedAt = null
+    }
+
+    if (patch.completedAt === null || patch.completedAtUnknown) {
+      await this.platformRepository.savePlatform(
+        userGame.id,
+        platform,
+        gameConsole,
+        values,
+        undefined,
+        { clearGameDate: true }
+      )
+    } else {
+      await this.platformRepository.savePlatform(
+        userGame.id,
+        platform,
+        gameConsole,
+        values
+      )
+    }
 
     return this.getPlatforms(userId, igdbId)
   }
@@ -416,7 +444,8 @@ export class UserGamePlatformService {
     const base: PlatformValues = existing
       ? {
           completions: existing.completions,
-          completedAt: existing.completedAt
+          completedAt: existing.completedAt,
+          completedAtUnknown: existing.completedAtUnknown
         }
       : userGame.platforms.length === 0 && !isNew
         ? legacyValues(userGame)
@@ -432,9 +461,16 @@ export class UserGamePlatformService {
       completions: countsHere
         ? Math.max(base.completions ?? 0, 1)
         : (base.completions ?? 0),
-      completedAt:
-        base.completedAt ??
-        (countsHere ? (data.completedAt ?? new Date()) : null)
+      // "Não sei a data" é escolha explícita: vale mais que a data da loja.
+      // Linha que já conta zeradas e está sem data (sem a marca): só uma data
+      // real da importação a preenche; "hoje" seria inventar.
+      completedAt: base.completedAtUnknown
+        ? null
+        : (base.completedAt ??
+          (countsHere
+            ? (data.completedAt ??
+              ((base.completions ?? 0) > 0 ? null : new Date()))
+            : null))
     }
 
     const accountHours: [AccountHours] | [] =

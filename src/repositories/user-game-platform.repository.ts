@@ -5,6 +5,7 @@ export interface PlatformValues {
   hoursPlayed?: number | null
   completions?: number
   completedAt?: Date | null
+  completedAtUnknown?: boolean
 }
 
 export interface AccountHours {
@@ -17,7 +18,8 @@ const platformBaseSelect = {
   console: true,
   hoursPlayed: true,
   completions: true,
-  completedAt: true
+  completedAt: true,
+  completedAtUnknown: true
 } satisfies Prisma.UserGamePlatformSelect
 
 const platformSelect = {
@@ -90,7 +92,8 @@ export class UserGamePlatformRepository {
     platform: Platform,
     gameConsole: Console,
     values: PlatformValues,
-    accountHours?: AccountHours
+    accountHours?: AccountHours,
+    options: { clearGameDate?: boolean } = {}
   ) {
     return prisma.$transaction(async tx => {
       const accountExists = await this.lockAccount(tx, accountHours, platform)
@@ -108,7 +111,7 @@ export class UserGamePlatformRepository {
       if (accountHours) {
         await this.applyAccountHours(tx, row.id, accountHours, accountExists)
       }
-      await this.recomputeTotals(tx, userGameId)
+      await this.recomputeTotals(tx, userGameId, options.clearGameDate)
     })
   }
 
@@ -288,7 +291,8 @@ export class UserGamePlatformRepository {
 
   private async recomputeTotals(
     tx: Prisma.TransactionClient,
-    userGameId: string
+    userGameId: string,
+    clearGameDate = false
   ) {
     const platforms = await tx.userGamePlatform.findMany({
       where: { userGameId },
@@ -318,7 +322,7 @@ export class UserGamePlatformRepository {
         where: { id: userGameId },
         data: { completedAt: earliestCompletedAt }
       })
-    } else if (completions === 0) {
+    } else if (completions === 0 || clearGameDate) {
       await tx.userGame.updateMany({
         where: { id: userGameId, completedAt: { not: null } },
         data: { completedAt: null }

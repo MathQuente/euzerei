@@ -160,7 +160,20 @@ describe('UserRepository.setAccountConsole', () => {
 
     const { sql } = lastQuery()
     expect(sql).toContain(
-      "CASE WHEN ugs.status = 'WISHLIST' THEN ug.created_at ELSE COALESCE(ug.completed_at, ug.updated_at) END DESC"
+      "CASE WHEN ugs.status = 'WISHLIST' THEN ug.created_at WHEN ugs.status = 'PLAYED' AND ug.completed_at IS NULL THEN ug.created_at ELSE COALESCE(ug.completed_at, ug.updated_at) END DESC"
+    )
+  })
+
+  it('orders a played game without a finish date by when it was added', async () => {
+    await new UserRepository().findManyGamesOfUser({
+      userId: 'user-1',
+      previewPerStatus: 8,
+      sortBy: 'completedAt',
+      sortOrder: 'desc'
+    })
+
+    expect(lastQuery().sql).toContain(
+      "WHEN ugs.status = 'PLAYED' AND ug.completed_at IS NULL THEN ug.created_at"
     )
   })
 })
@@ -220,6 +233,39 @@ describe('UserRepository dropped date', () => {
 
     const data = prismaMock.userGame.update.mock.calls[0][0].data
     expect(data.droppedAt).toBeUndefined()
+  })
+
+  it('stamps the finish date when a game moves into Jogado', async () => {
+    prismaMock.userGame.findUnique.mockResolvedValue({ userGamesStatusId: 3 })
+
+    await new UserRepository().updateGameStatus(1, 'user-1', 1)
+
+    const data = prismaMock.userGame.update.mock.calls[0][0].data
+    expect(data.completedAt).toBeInstanceOf(Date)
+  })
+
+  it('drops the unknown-date mark on the platforms when the game enters Jogado', async () => {
+    prismaMock.userGame.findUnique.mockResolvedValue({ userGamesStatusId: 3 })
+
+    await new UserRepository().updateGameStatus(1, 'user-1', 1)
+
+    const data = prismaMock.userGame.update.mock.calls[0][0].data
+    expect(data.platforms).toEqual({
+      updateMany: {
+        where: { completedAtUnknown: true },
+        data: { completedAtUnknown: false }
+      }
+    })
+  })
+
+  it('keeps the finish date (or its absence) when the game is already Jogado', async () => {
+    prismaMock.userGame.findUnique.mockResolvedValue({ userGamesStatusId: 1 })
+
+    await new UserRepository().updateGameStatus(1, 'user-1', 1)
+
+    const data = prismaMock.userGame.update.mock.calls[0][0].data
+    expect(data.completedAt).toBeUndefined()
+    expect(data.platforms).toBeUndefined()
   })
 
   it('does not read the game or touch the date for a status other than Larguei', async () => {
