@@ -200,14 +200,12 @@ export const UserGamePlayedCountUpdateBodySchema = z.object({
   incrementValue: z.number().int().min(-1).max(1)
 })
 
-// Horas digitadas à mão: uma casa decimal (as importações gravam duas, por
-// outro caminho). O float de 5.5 * 10 é exato; o epsilon cobre 0.1 * 3 e afins.
 const manualHours = z
   .number()
   .min(0)
-  .max(9999.9)
-  .refine(v => Math.abs(v * 10 - Math.round(v * 10)) < 1e-6, {
-    message: 'Use no máximo uma casa decimal.'
+  .max(9999.99)
+  .refine(v => Math.abs(v * 100 - Math.round(v * 100)) < 1e-6, {
+    message: 'Use no máximo duas casas decimais.'
   })
 
 export const UserGameHoursUpdateBodySchema = z.object({

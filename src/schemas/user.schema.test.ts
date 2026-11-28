@@ -273,13 +273,13 @@ describe('manual hours', () => {
   const hours = (v: number) =>
     UserGameHoursUpdateBodySchema.safeParse({ hoursPlayed: v }).success
 
-  it('accepts zero to one decimal place, up to 9999.9', () => {
-    for (const v of [0, 0.1, 5.5, 12, 0.3, 4.7, 9999.9])
+  it('accepts zero to two decimal places, up to 9999.99', () => {
+    for (const v of [0, 0.1, 5.5, 12, 0.3, 4.7, 9999.99, 0.55, 5.38, 0.02])
       expect(hours(v)).toBe(true)
   })
 
-  it('rejects two decimal places and values above the limit', () => {
-    for (const v of [5.53, 0.03, 9999.99, 10000, -1])
+  it('rejects three decimal places and values above the limit', () => {
+    for (const v of [5.531, 0.001, 9999.991, 10000, -1])
       expect(hours(v)).toBe(false)
   })
 
@@ -289,6 +289,6 @@ describe('manual hours', () => {
     expect(platform({ hoursPlayed: 5.5 })).toBe(true)
     expect(platform({ hoursPlayed: null })).toBe(true)
     expect(platform({ completions: 2 })).toBe(true)
-    expect(platform({ hoursPlayed: 5.53 })).toBe(false)
+    expect(platform({ hoursPlayed: 5.531 })).toBe(false)
   })
 })
