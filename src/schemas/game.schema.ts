@@ -18,6 +18,7 @@ export const IGDBGameSchema = z.object({
   developers: z.array(z.string()).optional(),
   publishers: z.array(z.string()).optional(),
   category: z.number(),
+  missingPcStores: z.array(z.enum(['STEAM', 'EPIC'])).optional(),
   parentGameId: z.number().nullable(),
   parentGame: z
     .object({

@@ -256,7 +256,7 @@ export class IGDBService {
   static async getGameById(igdbId: number): Promise<IGDBGame | null> {
     const results = await this.request<IGDBGame[]>(
       'games',
-      `where id = ${igdbId}; fields id,name,alternative_names.name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,category,game_type,parent_game.id,parent_game.name,parent_game.cover.url,parent_game.platforms.name,rating,follows,similar_games,game_status,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,release_dates.date,release_dates.date_format,release_dates.platform.name,screenshots.image_id,screenshots.width,screenshots.height,videos.video_id,videos.name; limit 1;`
+      `where id = ${igdbId}; fields id,name,alternative_names.name,summary,cover.url,genres.name,platforms.name,game_modes.name,first_release_date,category,game_type,parent_game.id,parent_game.name,parent_game.cover.url,parent_game.platforms.name,rating,follows,similar_games,game_status,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,release_dates.date,release_dates.date_format,release_dates.platform.name,screenshots.image_id,screenshots.width,screenshots.height,videos.video_id,videos.name,external_games.external_game_source,websites.type; limit 1;`
     )
     return results[0] ?? null
   }
