@@ -11,6 +11,7 @@ import {
   platformNamesFor
 } from '../utils/game-platform-filter'
 import { isHiddenFromCatalog } from '../utils/game-status'
+import { missingPcStores } from '../utils/pc-stores'
 import {
   type ReleasePrecision,
   asReleasePrecision,
@@ -20,7 +21,7 @@ import {
 
 const TRENDING_WINDOW_DAYS = 30
 const GAME_CACHE_TTL_SECONDS = 60 * 60
-const GAME_DETAIL_CACHE_VERSION = 2
+const GAME_DETAIL_CACHE_VERSION = 3
 const RECENT_FEATURED_LIMIT = 9
 
 // The released/coming-soon split changes at midnight in Brazil. The day of the
@@ -108,6 +109,7 @@ export class GameService {
       developers: developers && developers.length > 0 ? developers : undefined,
       publishers: publishers && publishers.length > 0 ? publishers : undefined,
       category: IGDBService.getGameType(game),
+      missingPcStores: missingPcStores(game),
       parentGameId,
       parentGame,
       releaseDates:

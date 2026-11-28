@@ -39,4 +39,6 @@ export interface IGDBGame {
   }[]
   screenshots?: { image_id: string; width?: number; height?: number }[]
   videos?: { video_id: string; name?: string }[]
+  external_games?: { external_game_source?: number }[]
+  websites?: { type?: number }[]
 }
