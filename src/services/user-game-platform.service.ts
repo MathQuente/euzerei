@@ -397,6 +397,7 @@ export class UserGamePlatformService {
         ? data.finished
         : data.confirmedFinished
 
+    let enteredPlayed = false
     if (!userGame) {
       await this.userRepository.addGameToUserLibrary({
         igdbId,
@@ -431,6 +432,9 @@ export class UserGamePlatformService {
           userId,
           targetStatusId
         )
+        enteredPlayed =
+          targetStatusId === PLAYED_STATUS_ID &&
+          userGame.userGamesStatusId !== PLAYED_STATUS_ID
       }
     }
 
@@ -445,7 +449,7 @@ export class UserGamePlatformService {
       ? {
           completions: existing.completions,
           completedAt: existing.completedAt,
-          completedAtUnknown: existing.completedAtUnknown
+          completedAtUnknown: existing.completedAtUnknown && !enteredPlayed
         }
       : userGame.platforms.length === 0 && !isNew
         ? legacyValues(userGame)
