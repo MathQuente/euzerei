@@ -34,7 +34,8 @@ export class ImportLimiter {
   async check(
     userId: string,
     store: ImportStore,
-    now: number = Date.now()
+    now: number = Date.now(),
+    queueFinish?: number
   ): Promise<ImportLimitCheck> {
     const limit = await this.settings.get('importsPerUserPerHour')
     const finishes = await this.runs.completedFinishesSince(
@@ -43,11 +44,18 @@ export class ImportLimiter {
       new Date(now - IMPORT_LIMIT_WINDOW_MS),
       limit
     )
-    if (finishes.length < limit) return { blocked: false }
-    return {
-      blocked: true,
-      until: finishes[limit - 1].getTime() + IMPORT_LIMIT_WINDOW_MS
+    const times = finishes.map(finish => finish.getTime())
+    const since = now - IMPORT_LIMIT_WINDOW_MS
+    if (
+      queueFinish !== undefined &&
+      queueFinish > since &&
+      !times.includes(queueFinish)
+    ) {
+      times.push(queueFinish)
     }
+    times.sort((a, b) => b - a)
+    if (times.length < limit) return { blocked: false }
+    return { blocked: true, until: times[limit - 1] + IMPORT_LIMIT_WINDOW_MS }
   }
 }
 

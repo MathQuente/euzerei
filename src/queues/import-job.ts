@@ -46,7 +46,10 @@ export async function enqueueUniqueImport(
   const limit = await (scope.limiter ?? defaultImportLimiter()).check(
     scope.userId,
     scope.store,
-    now
+    now,
+    existing && (await existing.getState()) === 'completed'
+      ? existing.finishedOn
+      : undefined
   )
   if (limit.blocked) {
     const remainingMinutes = Math.max(1, Math.ceil((limit.until - now) / 60000))
@@ -80,7 +83,7 @@ export async function getImportJobStatus<TResult>(
       status: 'completed' as const,
       result: job.returnvalue as TResult,
       finishedAt: job.finishedOn,
-      cooldownUntil: await cooldownUntil(scope, now)
+      cooldownUntil: await cooldownUntil(scope, now, job.finishedOn)
     }
   }
   if (state === 'failed') {
@@ -93,12 +96,17 @@ export async function getImportJobStatus<TResult>(
 }
 
 // Só um aviso para a tela: se o banco falhar aqui, a consulta de status não cai (o enfileirar decide de verdade).
-async function cooldownUntil(scope: ImportLimitScope, now: number) {
+async function cooldownUntil(
+  scope: ImportLimitScope,
+  now: number,
+  finishedOn?: number
+) {
   try {
     const limit = await (scope.limiter ?? defaultImportLimiter()).check(
       scope.userId,
       scope.store,
-      now
+      now,
+      finishedOn
     )
     return limit.blocked ? limit.until : undefined
   } catch (error) {
